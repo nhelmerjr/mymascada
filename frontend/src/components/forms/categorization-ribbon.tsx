@@ -791,7 +791,7 @@ export function CategorizationRibbon({
                             )}
                           </div>
 
-                          <div className="flex gap-2 sm:ml-3 sm:shrink-0">
+                          <div className="flex gap-2 sm:shrink-0">
                             <Button
                               size="sm"
                               onClick={() => handleApplySuggestion(suggestion)}
