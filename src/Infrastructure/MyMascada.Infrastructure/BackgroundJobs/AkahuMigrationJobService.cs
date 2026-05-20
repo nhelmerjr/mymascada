@@ -33,8 +33,8 @@ public class AkahuMigrationJobService : IAkahuMigrationJobService
             s => s.ProcessMigrationAsync(userId, bankConnectionId));
 
         _logger.LogInformation(
-            "Enqueued Akahu migration job {JobId} for connection {ConnectionId} (user {UserId})",
-            jobId, bankConnectionId, userId);
+            "Enqueued Akahu migration job {JobId} for connection {ConnectionId}",
+            jobId, bankConnectionId);
 
         return jobId;
     }

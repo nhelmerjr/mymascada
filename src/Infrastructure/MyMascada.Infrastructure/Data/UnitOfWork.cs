@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
 using MyMascada.Application.Common.Interfaces;
 
 namespace MyMascada.Infrastructure.Data;
@@ -11,26 +12,30 @@ namespace MyMascada.Infrastructure.Data;
 public class UnitOfWork : IUnitOfWork
 {
     private readonly ApplicationDbContext _context;
+    private readonly ILogger<UnitOfWork> _logger;
 
-    public UnitOfWork(ApplicationDbContext context)
+    public UnitOfWork(ApplicationDbContext context, ILogger<UnitOfWork> logger)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async Task<IUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
     {
         var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-        return new UnitOfWorkTransaction(transaction);
+        return new UnitOfWorkTransaction(transaction, _logger);
     }
 
     private sealed class UnitOfWorkTransaction : IUnitOfWorkTransaction
     {
         private readonly IDbContextTransaction _transaction;
+        private readonly ILogger _logger;
         private bool _committed;
 
-        public UnitOfWorkTransaction(IDbContextTransaction transaction)
+        public UnitOfWorkTransaction(IDbContextTransaction transaction, ILogger logger)
         {
             _transaction = transaction;
+            _logger = logger;
         }
 
         public async Task CommitAsync(CancellationToken cancellationToken = default)
@@ -47,11 +52,12 @@ public class UnitOfWork : IUnitOfWork
                 {
                     await _transaction.RollbackAsync();
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Rollback failures are swallowed because the underlying transaction
-                    // may already have been rolled back (e.g. connection drop). Dispose
-                    // must not throw out of a using block.
+                    // Don't throw out of DisposeAsync — but make the failed cleanup visible
+                    // during incidents. The underlying transaction may already have been
+                    // rolled back (e.g. connection drop), which is fine.
+                    _logger.LogWarning(ex, "UnitOfWork rollback failed during dispose");
                 }
             }
 

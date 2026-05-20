@@ -464,13 +464,13 @@ public class AkahuApiClient : IAkahuApiClient
 
         if (parsed == null || string.IsNullOrEmpty(parsed.Id))
         {
-            // The body can echo the request's state value (we use the user's GUID), so we route
-            // it through the structured logger (which scrubs sensitive fields) instead of letting
-            // it bleed into the exception message and downstream APM tooling.
-            var snippet = body.Length > 200 ? body.Substring(0, 200) + "..." : body;
+            // The body echoes the request's `state` value (we use the user's GUID),
+            // so we deliberately don't include any of the body in logs or the exception
+            // message. Length + status code is enough to diagnose a future shape drift
+            // without leaking user identifiers into logs/APM.
             _logger.LogWarning(
-                "Akahu webhook subscribe ({WebhookType}) returned unexpected shape; status={StatusCode}, body={BodySnippet}",
-                webhookType, response.StatusCode, snippet);
+                "Akahu webhook subscribe ({WebhookType}) returned unexpected shape; status={StatusCode}, bodyLength={BodyLength}",
+                webhookType, response.StatusCode, body.Length);
             throw new AkahuApiException(
                 $"Akahu webhook subscribe ({webhookType}) returned unexpected shape (status {(int)response.StatusCode}).",
                 response.StatusCode);

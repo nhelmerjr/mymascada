@@ -110,6 +110,8 @@ export function AkahuMigrationBanner({ className }: AkahuMigrationBannerProps) {
   }, []);
 
   const handleUpgrade = useCallback(async (connection: PendingMigrationConnection) => {
+    // Defense-in-depth against rapid double-click before React re-renders disabled state.
+    if (isInitiatingAny) return;
     setIsInitiatingAny(true);
     setUpgradingId(connection.connectionId);
     try {
@@ -142,7 +144,7 @@ export function AkahuMigrationBanner({ className }: AkahuMigrationBannerProps) {
       setUpgradingId(null);
       setIsInitiatingAny(false);
     }
-  }, [t]);
+  }, [t, isInitiatingAny]);
 
   if (!status || status.pendingConnections.length === 0 || dismissed) {
     return null;
