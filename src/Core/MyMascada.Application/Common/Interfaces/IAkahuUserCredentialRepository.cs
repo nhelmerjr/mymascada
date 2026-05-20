@@ -63,6 +63,14 @@ public interface IAkahuUserCredentialRepository
     Task<IReadOnlyList<AkahuUserCredential>> GetPendingRevocationsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Gets all active, non-soft-deleted credentials whose consent has not been revoked.
+    /// Used by recurring jobs that operate over every connected Akahu user.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of active Akahu credentials</returns>
+    Task<IReadOnlyList<AkahuUserCredential>> GetActiveCredentialsAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Updates only the revocation-related columns for a credential.
     /// Uses a targeted UPDATE to avoid overwriting fields modified by other processes.
     /// </summary>

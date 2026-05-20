@@ -9,6 +9,7 @@ import { apiClient } from '@/lib/api-client';
 import { DashboardProvider } from '@/contexts/dashboard-context';
 import { DashboardHeader } from '@/components/dashboard/dashboard-header';
 import { DashboardTemplateRenderer } from '@/components/dashboard/dashboard-template-renderer';
+import { AkahuMigrationBanner } from '@/components/bank-connections/akahu-migration-banner';
 import { useTranslations } from 'next-intl';
 import { useAuthGuard } from '@/hooks/use-auth-guard';
 import { SkeletonCard, SkeletonPanel } from '@/components/skeletons';
@@ -60,6 +61,11 @@ function DashboardContent() {
     <DashboardProvider>
       <AppLayout mainClassName="relative z-10 flex-1 w-full px-4 py-6 sm:px-5 lg:px-6 lg:py-8">
         <DashboardHeader />
+        {/* TODO(akahu-migration): once a global alerts slot lands, move this
+            into it. The banner returns null on empty/error so it's safe to
+            mount at the top of the dashboard for the migration window
+            (per docs/plans/akahu-migration-impact.md §4.7). */}
+        {isAuthResolved && <AkahuMigrationBanner />}
         {isAuthResolved ? (
           <DashboardTemplateRenderer />
         ) : (

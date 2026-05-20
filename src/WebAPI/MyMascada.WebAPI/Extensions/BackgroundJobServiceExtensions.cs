@@ -48,6 +48,10 @@ public static class BackgroundJobServiceExtensions
         services.AddScoped<MyMascada.Application.BackgroundJobs.ITokenRevocationRetryJobService,
             MyMascada.Infrastructure.BackgroundJobs.TokenRevocationRetryJobService>();
 
+        // Akahu webhook subscription reconciliation service
+        services.AddScoped<MyMascada.Application.BackgroundJobs.IAkahuWebhookSubscriptionReconciliationJobService,
+            MyMascada.Infrastructure.BackgroundJobs.AkahuWebhookSubscriptionReconciliationJobService>();
+
         // Rule suggestion generation job service
         services.AddScoped<MyMascada.Application.BackgroundJobs.IRuleSuggestionGenerationJobService,
             MyMascada.Infrastructure.BackgroundJobs.RuleSuggestionGenerationJobService>();

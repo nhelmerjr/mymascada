@@ -73,4 +73,10 @@ public class AkahuOptions
     /// Default: 1440 (24 hours).
     /// </summary>
     public int WebhookSigningKeysCacheMinutes { get; set; } = 1440;
+
+    /// <summary>
+    /// Whether to loosen duplicate-detection tolerance for Akahu connections that were
+    /// migrated to official open banking within the last 30 days. Default: true.
+    /// </summary>
+    public bool MigrationFallbackEnabled { get; set; } = true;
 }

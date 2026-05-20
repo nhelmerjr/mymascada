@@ -1,3 +1,4 @@
+using MediatR;
 using MyMascada.Application.Common.Interfaces;
 using MyMascada.Application.Features.BankConnections.Queries;
 using MyMascada.Domain.Entities;
@@ -15,7 +16,12 @@ public class ExchangeAkahuCodeQueryHandlerTests
         var bankConnectionRepository = Substitute.For<IBankConnectionRepository>();
         var encryptionService = Substitute.For<ISettingsEncryptionService>();
         var oauthStateStore = Substitute.For<IOAuthStateStore>();
+        var webhookSubscriptionService = Substitute.For<IAkahuWebhookSubscriptionService>();
+        var mediator = Substitute.For<IMediator>();
         var logger = Substitute.For<IApplicationLogger<ExchangeAkahuCodeQueryHandler>>();
+
+        webhookSubscriptionService.EnsureSubscriptionsAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new EnsureSubscriptionsResult(Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), new Dictionary<string, string>()));
 
         oauthStateStore.ValidateAndConsumeAsync(userId, "valid-state", Arg.Any<CancellationToken>())
             .Returns(true);
@@ -58,6 +64,8 @@ public class ExchangeAkahuCodeQueryHandlerTests
             bankConnectionRepository,
             encryptionService,
             oauthStateStore,
+            webhookSubscriptionService,
+            mediator,
             logger);
 
         var result = await handler.Handle(
@@ -76,6 +84,8 @@ public class ExchangeAkahuCodeQueryHandlerTests
                 c.ConsentGrantedAt.HasValue &&
                 c.ConsentCorrelationId == "valid-state"),
             Arg.Any<CancellationToken>());
+
+        await webhookSubscriptionService.Received(1).EnsureSubscriptionsAsync(userId, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -87,7 +97,12 @@ public class ExchangeAkahuCodeQueryHandlerTests
         var bankConnectionRepository = Substitute.For<IBankConnectionRepository>();
         var encryptionService = Substitute.For<ISettingsEncryptionService>();
         var oauthStateStore = Substitute.For<IOAuthStateStore>();
+        var webhookSubscriptionService = Substitute.For<IAkahuWebhookSubscriptionService>();
+        var mediator = Substitute.For<IMediator>();
         var logger = Substitute.For<IApplicationLogger<ExchangeAkahuCodeQueryHandler>>();
+
+        webhookSubscriptionService.EnsureSubscriptionsAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new EnsureSubscriptionsResult(Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), new Dictionary<string, string>()));
 
         oauthStateStore.ValidateAndConsumeAsync(userId, "state-abc-123", Arg.Any<CancellationToken>())
             .Returns(true);
@@ -118,6 +133,8 @@ public class ExchangeAkahuCodeQueryHandlerTests
             bankConnectionRepository,
             encryptionService,
             oauthStateStore,
+            webhookSubscriptionService,
+            mediator,
             logger);
 
         await handler.Handle(
@@ -166,12 +183,18 @@ public class ExchangeAkahuCodeQueryHandlerTests
 
     private static ExchangeAkahuCodeQueryHandler CreateHandler(IOAuthStateStore? oauthStateStore = null)
     {
+        var webhookSubscriptionService = Substitute.For<IAkahuWebhookSubscriptionService>();
+        webhookSubscriptionService.EnsureSubscriptionsAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new EnsureSubscriptionsResult(Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), new Dictionary<string, string>()));
+
         return new ExchangeAkahuCodeQueryHandler(
             Substitute.For<IAkahuApiClient>(),
             Substitute.For<IAkahuUserCredentialRepository>(),
             Substitute.For<IBankConnectionRepository>(),
             Substitute.For<ISettingsEncryptionService>(),
             oauthStateStore ?? Substitute.For<IOAuthStateStore>(),
+            webhookSubscriptionService,
+            Substitute.For<IMediator>(),
             Substitute.For<IApplicationLogger<ExchangeAkahuCodeQueryHandler>>());
     }
 }

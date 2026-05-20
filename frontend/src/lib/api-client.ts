@@ -13,6 +13,7 @@ import {
   HasAkahuCredentialsResponse,
   SaveAkahuCredentialsRequest,
   SaveAkahuCredentialsResult,
+  AkahuMigrationStatus,
 } from '@/types/bank-connections';
 import {
   BudgetSummary,
@@ -769,6 +770,7 @@ class ApiClient {
     currentBalance: number;
     currency: string;
     notes?: string;
+    isActive?: boolean;
   }): Promise<unknown> {
     return this.request(`/api/accounts/${id}`, {
       method: 'PUT',
@@ -1627,6 +1629,15 @@ class ApiClient {
 
   async hasAkahuCredentials(): Promise<HasAkahuCredentialsResponse> {
     return this.request('/api/BankConnections/akahu/has-credentials');
+  }
+
+  /**
+   * Returns the user's Akahu connections that still need to be re-authorised
+   * for the classic→official open-banking migration, plus the global deadline.
+   * Backed by GET /api/BankConnections/akahu/migration-status.
+   */
+  async getAkahuMigrationStatus(): Promise<AkahuMigrationStatus> {
+    return this.request('/api/BankConnections/akahu/migration-status');
   }
 
   async saveAkahuCredentials(request: SaveAkahuCredentialsRequest): Promise<SaveAkahuCredentialsResult> {

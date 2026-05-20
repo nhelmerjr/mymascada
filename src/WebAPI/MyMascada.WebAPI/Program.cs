@@ -463,6 +463,11 @@ recurringJobManager.AddOrUpdate<MyMascada.Application.BackgroundJobs.ITokenRevoc
     service => service.RetryPendingRevocationsAsync(),
     Hangfire.Cron.Daily(3, 45)); // Run daily at 3:45 AM
 
+recurringJobManager.AddOrUpdate<MyMascada.Application.BackgroundJobs.IAkahuWebhookSubscriptionReconciliationJobService>(
+    "reconcile-akahu-webhook-subscriptions",
+    service => service.ReconcileAllAsync(),
+    Hangfire.Cron.Daily(4, 0)); // Run daily at 4:00 AM
+
 // Hangfire automatically replaces CancellationToken parameters with its shutdown token at runtime
 recurringJobManager.AddOrUpdate<MyMascada.Application.BackgroundJobs.IRuleSuggestionGenerationJobService>(
     "weekly-rule-suggestion-generation",

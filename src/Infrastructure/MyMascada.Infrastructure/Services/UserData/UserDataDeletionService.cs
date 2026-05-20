@@ -13,17 +13,20 @@ public class UserDataDeletionService : IUserDataDeletionService
     private readonly ApplicationDbContext _context;
     private readonly IAkahuApiClient _akahuApiClient;
     private readonly ISettingsEncryptionService _encryptionService;
+    private readonly IAkahuWebhookSubscriptionService _webhookSubscriptionService;
     private readonly ILogger<UserDataDeletionService> _logger;
 
     public UserDataDeletionService(
         ApplicationDbContext context,
         IAkahuApiClient akahuApiClient,
         ISettingsEncryptionService encryptionService,
+        IAkahuWebhookSubscriptionService webhookSubscriptionService,
         ILogger<UserDataDeletionService> logger)
     {
         _context = context;
         _akahuApiClient = akahuApiClient;
         _encryptionService = encryptionService;
+        _webhookSubscriptionService = webhookSubscriptionService;
         _logger = logger;
     }
 
@@ -357,6 +360,20 @@ public class UserDataDeletionService : IUserDataDeletionService
             {
                 _logger.LogError(ex,
                     "Failed to revoke Akahu access token for user {UserId} during account deletion. Continuing with deletion.",
+                    userId);
+            }
+
+            // 31b. Tear down Akahu webhook subscriptions (best-effort — subscriptions die when the
+            // token is revoked anyway, but this calls DELETE /webhooks for cleanliness while the
+            // credential is still decryptable).
+            try
+            {
+                await _webhookSubscriptionService.TearDownSubscriptionsAsync(userId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to tear down Akahu webhook subscriptions for user {UserId} during account deletion. Continuing with deletion.",
                     userId);
             }
 

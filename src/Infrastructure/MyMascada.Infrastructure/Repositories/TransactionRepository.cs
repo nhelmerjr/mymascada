@@ -193,6 +193,41 @@ public class TransactionRepository : ITransactionRepository
                 .SetProperty(t => t.DeletedAt, now), ct);
     }
 
+    public async Task<DateTime?> GetOldestTransactionDateForAccountAsync(int accountId, CancellationToken ct = default)
+    {
+        var dates = await _context.Transactions
+            .Where(t => t.AccountId == accountId && !t.IsDeleted)
+            .OrderBy(t => t.TransactionDate)
+            .Select(t => (DateTime?)t.TransactionDate)
+            .Take(1)
+            .ToListAsync(ct);
+        return dates.FirstOrDefault();
+    }
+
+    public async Task<int> RemapExternalIdsAsync(int accountId, IReadOnlyDictionary<string, string> oldToNewExternalIds, CancellationToken ct = default)
+    {
+        if (oldToNewExternalIds == null || oldToNewExternalIds.Count == 0)
+            return 0;
+
+        // EF Core 8+ ExecuteUpdate cannot translate dictionary lookups, so update per-key.
+        // Each call is a single targeted UPDATE filtered on the indexed (AccountId, ExternalId)
+        // pair, which is materially cheaper than loading rows into memory.
+        var now = DateTime.UtcNow;
+        var updated = 0;
+        foreach (var (oldId, newId) in oldToNewExternalIds)
+        {
+            if (string.IsNullOrEmpty(oldId) || string.IsNullOrEmpty(newId) || oldId == newId)
+                continue;
+
+            updated += await _context.Transactions
+                .Where(t => t.AccountId == accountId && t.ExternalId == oldId && !t.IsDeleted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(t => t.ExternalId, newId)
+                    .SetProperty(t => t.UpdatedAt, now), ct);
+        }
+        return updated;
+    }
+
     public async Task DeleteByAccountIdAsync(int accountId, Guid userId)
     {
         if (!await _accountAccess.IsOwnerAsync(userId, accountId))

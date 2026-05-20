@@ -273,7 +273,8 @@ public class AkahuBankProvider : IBankProvider
             Reference = reference,
             Category = tx.Category?.Name,
             MerchantName = tx.Merchant?.Name,
-            Metadata = metadata.Count > 0 ? metadata : null
+            Metadata = metadata.Count > 0 ? metadata : null,
+            Migrated = tx.Migrated
         };
     }
 }

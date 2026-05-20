@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Options;
 using MyMascada.Application.Common.Interfaces;
 using MyMascada.Application.Features.BankConnections.DTOs;
 using MyMascada.Application.Features.ImportReview.DTOs;
 using MyMascada.Domain.Entities;
 using MyMascada.Domain.Enums;
+using MyMascada.Infrastructure.Services.BankIntegration.Providers;
 
 namespace MyMascada.Infrastructure.Services.BankIntegration;
 
@@ -19,7 +21,18 @@ public class BankSyncService : IBankSyncService
     private readonly IImportAnalysisService _importAnalysisService;
     private readonly ITransactionRepository _transactionRepository;
     private readonly IBankCategoryMappingService _categoryMappingService;
+    private readonly AkahuOptions _akahuOptions;
     private readonly IApplicationLogger<BankSyncService> _logger;
+
+    /// <summary>
+    /// Provider ID of Akahu connections.
+    /// </summary>
+    private const string AkahuProviderId = "akahu";
+
+    /// <summary>
+    /// How long after a migration the loosened dedup tolerance applies.
+    /// </summary>
+    private const int MigrationFallbackWindowDays = 30;
 
     /// <summary>
     /// Default sync window: last 30 days
@@ -44,6 +57,7 @@ public class BankSyncService : IBankSyncService
         IImportAnalysisService importAnalysisService,
         ITransactionRepository transactionRepository,
         IBankCategoryMappingService categoryMappingService,
+        IOptions<AkahuOptions> akahuOptions,
         IApplicationLogger<BankSyncService> logger)
     {
         _providerFactory = providerFactory ?? throw new ArgumentNullException(nameof(providerFactory));
@@ -53,6 +67,7 @@ public class BankSyncService : IBankSyncService
         _importAnalysisService = importAnalysisService ?? throw new ArgumentNullException(nameof(importAnalysisService));
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _categoryMappingService = categoryMappingService ?? throw new ArgumentNullException(nameof(categoryMappingService));
+        _akahuOptions = akahuOptions?.Value ?? throw new ArgumentNullException(nameof(akahuOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -128,20 +143,41 @@ public class BankSyncService : IBankSyncService
                 .ToList();
 
             // 9. Use ImportAnalysisService for duplicate detection
-            var analysisRequest = new AnalyzeImportRequest
-            {
-                Source = "bankapi",
-                AccountId = connection.AccountId,
-                UserId = connection.UserId,
-                Candidates = candidates,
-                Options = new ImportAnalysisOptions
+            // Akahu's classic-to-official migration re-emits historical transactions with new IDs
+            // and documented drift in date/type/description, so exact-match dedup misses them.
+            // For recently-migrated Akahu connections we widen the tolerance during a 30-day
+            // window so near-duplicate re-imports are still caught.
+            var usesMigrationFallback =
+                _akahuOptions.MigrationFallbackEnabled
+                && connection.ProviderId == AkahuProviderId
+                && connection.LastMigratedAt.HasValue
+                && connection.LastMigratedAt.Value >= DateTime.UtcNow.AddDays(-MigrationFallbackWindowDays);
+
+            var importOptions = usesMigrationFallback
+                ? new ImportAnalysisOptions
+                {
+                    DateToleranceDays = 2,
+                    AmountTolerance = 0.005m,
+                    DescriptionSimilarityThreshold = 0.7,
+                    IncludeManualTransactions = true,
+                    IncludeRecentImports = true
+                }
+                : new ImportAnalysisOptions
                 {
                     DateToleranceDays = 0, // Exact date match for bank API (bank APIs provide precise dates)
                     AmountTolerance = 0m, // Exact amount match
                     DescriptionSimilarityThreshold = 0.5,
                     IncludeManualTransactions = true,
                     IncludeRecentImports = true
-                }
+                };
+
+            var analysisRequest = new AnalyzeImportRequest
+            {
+                Source = "bankapi",
+                AccountId = connection.AccountId,
+                UserId = connection.UserId,
+                Candidates = candidates,
+                Options = importOptions
             };
 
             var analysisResult = await _importAnalysisService.AnalyzeImportAsync(analysisRequest);

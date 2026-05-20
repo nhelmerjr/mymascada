@@ -5,6 +5,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using MyMascada.Application.Common.Interfaces;
+using MyMascada.Application.Features.BankConnections.DTOs;
+using MyMascada.Domain.Common;
 
 namespace MyMascada.Infrastructure.Services.BankIntegration.Providers;
 
@@ -110,6 +112,40 @@ public class AkahuApiClient : IAkahuApiClient
         return account != null ? MapToAccountInfo(account) : null;
     }
 
+    public async Task<IReadOnlyList<AkahuConnectionInfo>> GetConnectionsWithCredentialsAsync(
+        string appIdToken,
+        string userToken,
+        CancellationToken ct = default)
+    {
+        var request = CreateAuthenticatedRequest(HttpMethod.Get, "connections", appIdToken, userToken);
+        _logger.LogInformation("Akahu API request: {Method} {BaseAddress}{RequestUri}",
+            request.Method, _httpClient.BaseAddress, request.RequestUri);
+        var response = await _httpClient.SendAsync(request, ct);
+        await EnsureSuccessAsync(response, "Get connections");
+
+        var result = await response.Content.ReadFromJsonAsync<AkahuListResponse<AkahuConnection>>(JsonOptions, ct);
+        var connections = result?.Items ?? Array.Empty<AkahuConnection>();
+        return connections.Select(c => new AkahuConnectionInfo
+        {
+            Id = c.Id,
+            Name = c.Name,
+            Logo = c.Logo,
+            Classic = c.Classic
+        }).ToList();
+    }
+
+    public async Task<IReadOnlyList<BankTransactionDto>> GetTransactionsWithCredentialsAsync(
+        string appIdToken,
+        string userToken,
+        string accountId,
+        DateTime? start = null,
+        DateTime? end = null,
+        CancellationToken ct = default)
+    {
+        var transactions = await GetTransactionsAsync(appIdToken, userToken, accountId, start, end, ct);
+        return transactions.Select(MapToBankTransactionDto).ToList();
+    }
+
     /// <summary>
     /// Validates that the provided credentials are valid by making a test API call.
     /// </summary>
@@ -144,8 +180,45 @@ public class AkahuApiClient : IAkahuApiClient
         CurrentBalance = account.Balance?.Current,
         AvailableBalance = account.Balance?.Available,
         Currency = account.Balance?.Currency ?? "NZD",
-        BankName = account.Connection?.Name ?? string.Empty
+        BankName = account.Connection?.Name ?? string.Empty,
+        Migrated = account.Migrated,
+        ConnectionClassic = account.Connection?.Classic
     };
+
+    private static BankTransactionDto MapToBankTransactionDto(AkahuTransaction tx)
+    {
+        var referenceParts = new[] { tx.Meta?.Particulars, tx.Meta?.Code, tx.Meta?.Reference }
+            .Where(p => !string.IsNullOrEmpty(p));
+        var reference = referenceParts.Any() ? string.Join(" | ", referenceParts) : null;
+
+        var metadata = new Dictionary<string, object>();
+        if (tx.Meta?.OtherAccount != null)
+            metadata["otherAccount"] = tx.Meta.OtherAccount;
+        if (tx.Meta?.CardSuffix != null)
+            metadata["cardSuffix"] = tx.Meta.CardSuffix;
+        if (tx.Meta?.Conversion != null)
+        {
+            metadata["foreignAmount"] = tx.Meta.Conversion.Amount;
+            metadata["foreignCurrency"] = tx.Meta.Conversion.Currency;
+            metadata["exchangeRate"] = tx.Meta.Conversion.Rate;
+        }
+        if (tx.Category?.Groups?.PersonalFinance != null)
+            metadata["akahuCategoryGroup"] = tx.Category.Groups.PersonalFinance;
+
+        return new BankTransactionDto
+        {
+            ExternalId = tx.Id,
+            // Match AkahuBankProvider.MapTransaction so timezone display does not shift the date.
+            Date = DateTimeProvider.StartOfDayUtc(tx.Date),
+            Amount = tx.Amount,
+            Description = tx.Description,
+            Reference = reference,
+            Category = tx.Category?.Name,
+            MerchantName = tx.Merchant?.Name,
+            Metadata = metadata.Count > 0 ? metadata : null,
+            Migrated = tx.Migrated
+        };
+    }
 
     /// <summary>
     /// Exchange authorization code for access token (internal - Production App mode)
@@ -331,9 +404,10 @@ public class AkahuApiClient : IAkahuApiClient
     }
 
     /// <summary>
-    /// Subscribe to an Akahu webhook type for the given user.
+    /// Subscribe to an Akahu webhook type for the given user. Returns the created subscription
+    /// (Akahu-issued <c>_id</c>, type, and the echoed state) so the caller can persist the row.
     /// </summary>
-    public async Task SubscribeToWebhookAsync(string appIdToken, string userToken, string webhookType, string? state = null, CancellationToken ct = default)
+    public async Task<AkahuWebhookSubscriptionInfo> SubscribeToWebhookAsync(string appIdToken, string userToken, string webhookType, string? state = null, CancellationToken ct = default)
     {
         var request = CreateAuthenticatedRequest(HttpMethod.Post, "webhooks", appIdToken, userToken);
         var payload = new { webhook_type = webhookType, state };
@@ -342,7 +416,70 @@ public class AkahuApiClient : IAkahuApiClient
         var response = await _httpClient.SendAsync(request, ct);
         await EnsureSuccessAsync(response, $"Subscribe to webhook ({webhookType})");
 
-        _logger.LogInformation("Subscribed to Akahu {WebhookType} webhook", webhookType);
+        // Buffer the body to a string so we can attempt multiple response shapes without
+        // re-reading the underlying Stream (which is disposed after the first read).
+        // Akahu's POST /webhooks actually returns { "success": true, "item_id": "hook_xxx" }
+        // (verified empirically against the dev environment, 2026-05-17); the other shapes
+        // are kept as fallbacks in case other endpoints or future versions differ.
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        AkahuWebhookSubscriptionResponse? parsed = null;
+
+        // Shape 1 (current Akahu behaviour for POST /webhooks): { success, item_id }
+        try
+        {
+            var idResponse = JsonSerializer.Deserialize<AkahuItemIdResponse>(body, JsonOptions);
+            if (!string.IsNullOrEmpty(idResponse?.ItemId))
+            {
+                parsed = new AkahuWebhookSubscriptionResponse
+                {
+                    Id = idResponse.ItemId,
+                    WebhookType = webhookType,
+                    State = state
+                };
+            }
+        }
+        catch (JsonException) { /* fall through */ }
+
+        // Shape 2: { success, item: { _id, webhook_type, state } }
+        if (parsed == null || string.IsNullOrEmpty(parsed.Id))
+        {
+            try
+            {
+                var item = JsonSerializer.Deserialize<AkahuItemResponse<AkahuWebhookSubscriptionResponse>>(body, JsonOptions);
+                parsed = item?.Item;
+            }
+            catch (JsonException) { parsed = null; }
+        }
+
+        // Shape 3: bare { _id, webhook_type, state }
+        if (parsed == null || string.IsNullOrEmpty(parsed.Id))
+        {
+            try
+            {
+                parsed = JsonSerializer.Deserialize<AkahuWebhookSubscriptionResponse>(body, JsonOptions);
+            }
+            catch (JsonException) { parsed = null; }
+        }
+
+        if (parsed == null || string.IsNullOrEmpty(parsed.Id))
+        {
+            // Include a truncated snippet of the body so we can diagnose unexpected shapes
+            // without leaking large or sensitive payloads into logs.
+            var snippet = body.Length > 200 ? body.Substring(0, 200) + "..." : body;
+            throw new AkahuApiException(
+                $"Akahu: Subscribe to webhook ({webhookType}) - response did not include a webhook ID. Body: {snippet}",
+                response.StatusCode);
+        }
+
+        _logger.LogInformation("Subscribed to Akahu {WebhookType} webhook (id={WebhookId})", webhookType, parsed.Id);
+
+        return new AkahuWebhookSubscriptionInfo
+        {
+            Id = parsed.Id,
+            WebhookType = string.IsNullOrEmpty(parsed.WebhookType) ? webhookType : parsed.WebhookType,
+            State = parsed.State ?? state
+        };
     }
 
     /// <summary>
@@ -449,6 +586,13 @@ public record AkahuItemResponse<T>
     public T? Item { get; init; }
 }
 
+public record AkahuItemIdResponse
+{
+    public bool Success { get; init; }
+    [JsonPropertyName("item_id")]
+    public string? ItemId { get; init; }
+}
+
 public record AkahuTokenResponse
 {
     public string AccessToken { get; init; } = string.Empty;
@@ -468,6 +612,8 @@ public record AkahuAccount
     public AkahuAccountBalance? Balance { get; init; }
     public AkahuConnection? Connection { get; init; }
     public string[] Attributes { get; init; } = Array.Empty<string>();
+    [JsonPropertyName("_migrated")]
+    public string? Migrated { get; init; }
 }
 
 public record AkahuAccountBalance
@@ -485,6 +631,8 @@ public record AkahuConnection
     public string Id { get; init; } = string.Empty;  // conn_xxx
     public string Name { get; init; } = string.Empty;  // e.g., "ANZ"
     public string? Logo { get; init; }
+    [JsonPropertyName("_classic")]
+    public string? Classic { get; init; }
 }
 
 public record AkahuTransaction
@@ -503,6 +651,8 @@ public record AkahuTransaction
     public AkahuTransactionMeta? Meta { get; init; }
     [JsonPropertyName("created_at")]
     public DateTime CreatedAt { get; init; }
+    [JsonPropertyName("_migrated")]
+    public string? Migrated { get; init; }
 }
 
 public record AkahuTransactionCategory
