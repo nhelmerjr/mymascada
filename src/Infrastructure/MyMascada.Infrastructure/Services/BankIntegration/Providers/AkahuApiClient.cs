@@ -464,11 +464,15 @@ public class AkahuApiClient : IAkahuApiClient
 
         if (parsed == null || string.IsNullOrEmpty(parsed.Id))
         {
-            // Include a truncated snippet of the body so we can diagnose unexpected shapes
-            // without leaking large or sensitive payloads into logs.
+            // The body can echo the request's state value (we use the user's GUID), so we route
+            // it through the structured logger (which scrubs sensitive fields) instead of letting
+            // it bleed into the exception message and downstream APM tooling.
             var snippet = body.Length > 200 ? body.Substring(0, 200) + "..." : body;
+            _logger.LogWarning(
+                "Akahu webhook subscribe ({WebhookType}) returned unexpected shape; status={StatusCode}, body={BodySnippet}",
+                webhookType, response.StatusCode, snippet);
             throw new AkahuApiException(
-                $"Akahu: Subscribe to webhook ({webhookType}) - response did not include a webhook ID. Body: {snippet}",
+                $"Akahu webhook subscribe ({webhookType}) returned unexpected shape (status {(int)response.StatusCode}).",
                 response.StatusCode);
         }
 

@@ -235,6 +235,41 @@ public class AkahuWebhookSubscriptionServiceTests
     }
 
     [Fact]
+    public async Task EnsureSubscriptionsAsync_ListWebhooksThrows_AbortsWithoutDeletingLocalRows()
+    {
+        // Regression: treating an unreachable Akahu as "remote has no subscriptions" used
+        // to tear down perfectly-good local rows. We must abort the reconcile and let the
+        // next cycle pick it up instead.
+        var ctx = CreateContext();
+        var userId = Guid.NewGuid();
+        SetupHappyCredentials(ctx, userId);
+
+        var localToken = new AkahuWebhookSubscription
+        {
+            Id = 7,
+            UserId = userId,
+            AkahuUserCredentialId = 1,
+            WebhookId = "whk_existing_token",
+            WebhookType = AkahuWebhookTypes.Token
+        };
+        ctx.SubscriptionRepository.GetByUserIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new[] { localToken });
+
+        ctx.AkahuApiClient.ListWebhooksAsync(AppToken, UserToken, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("Akahu unreachable"));
+
+        var result = await ctx.Service.EnsureSubscriptionsAsync(userId);
+
+        // Every required webhook type is reported as failed so callers can surface the issue.
+        result.FailedTypes.Should().NotBeEmpty();
+        // No destructive operations should have run.
+        await ctx.SubscriptionRepository.DidNotReceive().DeleteByIdAsync(Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await ctx.SubscriptionRepository.DidNotReceive().DeleteByUserIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
+        await ctx.AkahuApiClient.DidNotReceive().SubscribeToWebhookAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task EnsureSubscriptionsAsync_LocalRowMissingAtAkahu_ReSubscribes()
     {
         var ctx = CreateContext();

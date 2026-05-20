@@ -36,6 +36,13 @@ public class GetAkahuMigrationStatusQueryHandler
     private const string AkahuProviderId = "akahu";
 
     /// <summary>
+    /// Marker the migration command writes into <c>BankConnection.LastSyncError</c> when it
+    /// cannot find a matching <c>_migrated</c> account and disables the connection. The
+    /// migration banner needs to keep showing those rows so the user can re-authorise.
+    /// </summary>
+    private const string AwaitingReauthMarker = "Awaiting re-authorisation";
+
+    /// <summary>
     /// 24 May 2026, 23:59:59 New Zealand time (UTC+12).
     /// </summary>
     private static readonly DateTimeOffset MigrationDeadline =
@@ -68,9 +75,10 @@ public class GetAkahuMigrationStatusQueryHandler
         var allConnections = await _bankConnectionRepository.GetByUserIdAsync(request.UserId, cancellationToken);
         var akahuConnections = allConnections
             .Where(c => c.ProviderId == AkahuProviderId
-                && c.IsActive
                 && !string.IsNullOrEmpty(c.ExternalAccountId)
-                && c.LastMigratedAt == null)
+                && c.LastMigratedAt == null
+                && (c.IsActive
+                    || (c.LastSyncError != null && c.LastSyncError.Contains(AwaitingReauthMarker, StringComparison.OrdinalIgnoreCase))))
             .ToList();
 
         if (akahuConnections.Count == 0)

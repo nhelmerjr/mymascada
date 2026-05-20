@@ -137,7 +137,7 @@ We should send these to hello@akahu.nz today, copying Josh, and ask for written 
 
 ## 3. Code audit — every place that persists or matches on Akahu IDs
 
-All paths are absolute under `/Volumes/SabrentSSD/Source/source/mymascada`.
+All paths below are relative to the repository root.
 
 ### 3.1 Persisted identifiers (database)
 

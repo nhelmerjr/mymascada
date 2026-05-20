@@ -280,7 +280,28 @@ public class AkahuApiClientTests
             await client.SubscribeToWebhookAsync(TestAppToken, "user_token", "TOKEN", "user_guid");
 
         var ex = await act.Should().ThrowAsync<AkahuApiException>();
-        ex.Which.Message.Should().Contain("did not include a webhook ID");
+        ex.Which.Message.Should().Contain("unexpected shape");
+    }
+
+    [Fact]
+    public async Task SubscribeToWebhook_ResponseWithoutId_ExceptionMessageDoesNotIncludeBody()
+    {
+        // The Akahu response body echoes the request state (= user GUID). It must not bleed
+        // into the exception message; the structured logger receives it instead.
+        var stateValue = "user_guid_12345_secret";
+        var responseJson = "{\"success\":true,\"item\":{\"webhook_type\":\"TOKEN\",\"state\":\"" + stateValue + "\"}}";
+        var handler = new DelegatingHandlerStub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson, Encoding.UTF8, "application/json")
+        }));
+        var client = CreateClient(handler);
+
+        Func<Task> act = async () =>
+            await client.SubscribeToWebhookAsync(TestAppToken, "user_token", "TOKEN", stateValue);
+
+        var ex = await act.Should().ThrowAsync<AkahuApiException>();
+        ex.Which.Message.Should().NotContain(stateValue);
+        ex.Which.Message.Should().NotContain("success");
     }
 
     private static AkahuApiClient CreateClient(DelegatingHandlerStub handler)

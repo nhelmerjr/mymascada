@@ -142,7 +142,7 @@ MyMascada uses JWT-based authentication with HTTP-only refresh tokens. The authe
 - **HTTPS:** All production traffic is served over HTTPS. The refresh token `Secure` flag condition was corrected to always set `Secure` in non-development environments (security issue #231).
 
 **Confirmation needed from Akahu:**
-Josh's reply (2026-04-03) invited Rodrigo to send the current authentication process details so Akahu can confirm the design satisfies the read-only bar. This send has not yet been completed (see readiness tracker, section C).
+Josh's reply (2026-04-03) invited Rodrigo to send the current authentication process details so Akahu can confirm the design satisfies the read-only bar. This send has not yet been completed and is tracked separately in the Obsidian readiness note `Projects/MyMascada/Integrations/Akahu Accreditation Readiness.md`.
 
 **Key source files / migrations:**
 - `src/WebAPI/MyMascada.WebAPI/Migrations/20260326061051_RemoveTwoFactorEnabled.cs`

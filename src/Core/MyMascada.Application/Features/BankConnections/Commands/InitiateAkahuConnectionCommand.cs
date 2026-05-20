@@ -120,7 +120,7 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
             credential.UpdatedAt = DateTime.UtcNow;
             await _credentialRepository.UpdateAsync(credential, cancellationToken);
 
-            if (mode == "personal_app")
+            if (mode == "personal_tokens")
             {
                 return new InitiateConnectionResult
                 {
@@ -145,7 +145,7 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
             credential.UpdatedAt = DateTime.UtcNow;
             await _credentialRepository.UpdateAsync(credential, cancellationToken);
 
-            if (mode == "personal_app")
+            if (mode == "personal_tokens")
             {
                 return new InitiateConnectionResult
                 {

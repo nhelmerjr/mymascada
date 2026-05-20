@@ -1,6 +1,6 @@
 using MediatR;
+using MyMascada.Application.BackgroundJobs;
 using MyMascada.Application.Common.Interfaces;
-using MyMascada.Application.Features.BankConnections.Commands;
 using MyMascada.Application.Features.BankConnections.DTOs;
 
 namespace MyMascada.Application.Features.BankConnections.Queries;
@@ -41,7 +41,7 @@ public class ExchangeAkahuCodeQueryHandler : IRequestHandler<ExchangeAkahuCodeQu
     private readonly ISettingsEncryptionService _encryptionService;
     private readonly IOAuthStateStore _oauthStateStore;
     private readonly IAkahuWebhookSubscriptionService _webhookSubscriptionService;
-    private readonly IMediator _mediator;
+    private readonly IAkahuMigrationJobService _migrationJobService;
     private readonly IApplicationLogger<ExchangeAkahuCodeQueryHandler> _logger;
 
     public ExchangeAkahuCodeQueryHandler(
@@ -51,7 +51,7 @@ public class ExchangeAkahuCodeQueryHandler : IRequestHandler<ExchangeAkahuCodeQu
         ISettingsEncryptionService encryptionService,
         IOAuthStateStore oauthStateStore,
         IAkahuWebhookSubscriptionService webhookSubscriptionService,
-        IMediator mediator,
+        IAkahuMigrationJobService migrationJobService,
         IApplicationLogger<ExchangeAkahuCodeQueryHandler> logger)
     {
         _akahuApiClient = akahuApiClient ?? throw new ArgumentNullException(nameof(akahuApiClient));
@@ -60,7 +60,7 @@ public class ExchangeAkahuCodeQueryHandler : IRequestHandler<ExchangeAkahuCodeQu
         _encryptionService = encryptionService ?? throw new ArgumentNullException(nameof(encryptionService));
         _oauthStateStore = oauthStateStore ?? throw new ArgumentNullException(nameof(oauthStateStore));
         _webhookSubscriptionService = webhookSubscriptionService ?? throw new ArgumentNullException(nameof(webhookSubscriptionService));
-        _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
+        _migrationJobService = migrationJobService ?? throw new ArgumentNullException(nameof(migrationJobService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -153,51 +153,36 @@ public class ExchangeAkahuCodeQueryHandler : IRequestHandler<ExchangeAkahuCodeQu
             _logger.LogWarning(ex, "EnsureSubscriptionsAsync threw for user {UserId} during OAuth callback; continuing", request.UserId);
         }
 
-        // 1c. Run the Akahu classic→official migration for any existing active connections the
-        // user already has. Failures are logged but never block the OAuth callback — the
-        // command itself marks an unmigrated connection as "Awaiting re-authorisation".
+        // 1c. Enqueue the Akahu classic→official migration as a background job for any
+        // existing active connections the user has that have not already been migrated.
+        // Failures are logged but never block the OAuth callback.
         try
         {
             var existingAkahuConnections = await _bankConnectionRepository.GetByUserIdAsync(request.UserId, cancellationToken);
             var candidates = existingAkahuConnections
-                .Where(c => c.ProviderId == AkahuProviderId && c.IsActive)
+                .Where(c => c.ProviderId == AkahuProviderId && c.IsActive && c.LastMigratedAt == null)
                 .ToList();
 
             if (candidates.Count > 0)
             {
-                var migrated = 0;
-                var awaitingReauth = 0;
-                var failed = 0;
-                var totalTransactionsRemapped = 0;
-
                 foreach (var candidate in candidates)
                 {
                     try
                     {
-                        var migrateResult = await _mediator.Send(
-                            new MigrateAkahuConnectionCommand(request.UserId, candidate.Id),
-                            cancellationToken);
-
-                        if (migrateResult.Success)
-                        {
-                            migrated++;
-                            totalTransactionsRemapped += migrateResult.TransactionsRemapped;
-                        }
-                        else
-                        {
-                            awaitingReauth++;
-                        }
+                        var jobId = _migrationJobService.EnqueueMigration(request.UserId, candidate.Id);
+                        _logger.LogInformation(
+                            "Post-OAuth: enqueued Akahu migration job {JobId} for connection {ConnectionId} (user {UserId})",
+                            jobId, candidate.Id, request.UserId);
                     }
                     catch (Exception ex)
                     {
-                        failed++;
-                        _logger.LogWarning(ex, "MigrateAkahuConnectionCommand threw for connection {ConnectionId}", candidate.Id);
+                        _logger.LogWarning(ex, "Post-OAuth: failed to enqueue Akahu migration for connection {ConnectionId}", candidate.Id);
                     }
                 }
 
                 _logger.LogInformation(
-                    "Post-OAuth Akahu migration summary for user {UserId}: migrated={Migrated}, awaitingReauth={AwaitingReauth}, failed={Failed}, txRemapped={TxRemapped}",
-                    request.UserId, migrated, awaitingReauth, failed, totalTransactionsRemapped);
+                    "Post-OAuth Akahu migration sweep enqueued {Count} job(s) for user {UserId}",
+                    candidates.Count, request.UserId);
             }
         }
         catch (Exception ex)

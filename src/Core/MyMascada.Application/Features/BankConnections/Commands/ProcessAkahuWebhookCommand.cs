@@ -1,4 +1,5 @@
 using MediatR;
+using MyMascada.Application.BackgroundJobs;
 using MyMascada.Application.Common.Interfaces;
 using MyMascada.Application.Features.BankConnections.DTOs;
 using MyMascada.Domain.Enums;
@@ -17,7 +18,7 @@ public class ProcessAkahuWebhookCommandHandler : IRequestHandler<ProcessAkahuWeb
     private readonly IAkahuUserCredentialRepository _credentialRepository;
     private readonly ITransactionRepository _transactionRepository;
     private readonly IAkahuWebhookSubscriptionRepository _subscriptionRepository;
-    private readonly IMediator _mediator;
+    private readonly IAkahuMigrationJobService _migrationJobService;
     private readonly IApplicationLogger<ProcessAkahuWebhookCommandHandler> _logger;
 
     private const string AkahuProviderId = "akahu";
@@ -28,7 +29,7 @@ public class ProcessAkahuWebhookCommandHandler : IRequestHandler<ProcessAkahuWeb
         IAkahuUserCredentialRepository credentialRepository,
         ITransactionRepository transactionRepository,
         IAkahuWebhookSubscriptionRepository subscriptionRepository,
-        IMediator mediator,
+        IAkahuMigrationJobService migrationJobService,
         IApplicationLogger<ProcessAkahuWebhookCommandHandler> logger)
     {
         _bankConnectionRepository = bankConnectionRepository;
@@ -36,7 +37,7 @@ public class ProcessAkahuWebhookCommandHandler : IRequestHandler<ProcessAkahuWeb
         _credentialRepository = credentialRepository;
         _transactionRepository = transactionRepository;
         _subscriptionRepository = subscriptionRepository;
-        _mediator = mediator;
+        _migrationJobService = migrationJobService;
         _logger = logger;
     }
 
@@ -153,20 +154,24 @@ public class ProcessAkahuWebhookCommandHandler : IRequestHandler<ProcessAkahuWeb
         }
 
         _logger.LogInformation(
-            "ACCOUNT/MIGRATE webhook: dispatching MigrateAkahuConnectionCommand for connection {ConnectionId} (user {UserId})",
+            "ACCOUNT/MIGRATE webhook: enqueueing migration job for connection {ConnectionId} (user {UserId})",
             connection.Id, connection.UserId);
 
         try
         {
-            var result = await _mediator.Send(new MigrateAkahuConnectionCommand(connection.UserId, connection.Id), ct);
+            // Fire-and-forget via Hangfire so this webhook handler responds within Akahu's
+            // timeout. The job retries automatically on failure.
+            var jobId = _migrationJobService.EnqueueMigration(connection.UserId, connection.Id);
             _logger.LogInformation(
-                "ACCOUNT/MIGRATE complete for connection {ConnectionId}: success={Success}, txRemapped={TxRemapped}",
-                connection.Id, result.Success, result.TransactionsRemapped);
+                "ACCOUNT/MIGRATE enqueued job {JobId} for connection {ConnectionId}",
+                jobId, connection.Id);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ACCOUNT/MIGRATE handler failed for connection {ConnectionId}", connection.Id);
+            _logger.LogError(ex, "ACCOUNT/MIGRATE failed to enqueue migration job for connection {ConnectionId}", connection.Id);
         }
+
+        await Task.CompletedTask;
     }
 
     private async Task HandleWebhookCancelledAsync(AkahuWebhookPayload payload, string webhookType, CancellationToken ct)

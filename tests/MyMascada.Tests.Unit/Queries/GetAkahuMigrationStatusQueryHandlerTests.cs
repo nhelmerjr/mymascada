@@ -249,6 +249,54 @@ public class GetAkahuMigrationStatusQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_AwaitingReauthInactiveConnection_StillSurfacedInPendingList()
+    {
+        // Regression: a connection that the migrate command disabled with
+        // LastSyncError = "Awaiting re-authorisation" must keep showing up in the
+        // banner. Filtering on IsActive == true alone would silently hide the row
+        // exactly when the user needs to act.
+        var ctx = CreateContext();
+        var userId = Guid.NewGuid();
+
+        var connection = new BankConnection
+        {
+            Id = 22,
+            UserId = userId,
+            ProviderId = "akahu",
+            IsActive = false,
+            LastSyncError = "Awaiting re-authorisation",
+            ExternalAccountId = OldAccountId,
+            ExternalAccountName = "ANZ Everyday"
+        };
+
+        ctx.BankConnectionRepository.GetByUserIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new[] { connection });
+
+        ctx.CredentialRepository.GetByUserIdAsync(userId, Arg.Any<CancellationToken>())
+            .Returns(new AkahuUserCredential
+            {
+                Id = 1,
+                UserId = userId,
+                EncryptedAppToken = "enc_app",
+                EncryptedUserToken = "enc_user"
+            });
+
+        ctx.EncryptionService.DecryptSettings<string>("enc_app").Returns("app_token");
+        ctx.EncryptionService.DecryptSettings<string>("enc_user").Returns("user_token");
+
+        ctx.AkahuApiClient.GetAccountsWithCredentialsAsync("app_token", "user_token", Arg.Any<CancellationToken>())
+            .Returns(new[]
+            {
+                new AkahuAccountInfo { Id = NewAccountId, Migrated = OldAccountId, Name = "ANZ Everyday (Official)" }
+            });
+
+        var result = await ctx.Handler.Handle(new GetAkahuMigrationStatusQuery(userId), CancellationToken.None);
+
+        result.PendingConnections.Should().HaveCount(1);
+        result.PendingConnections[0].ConnectionId.Should().Be(22);
+    }
+
+    [Fact]
     public async Task Handle_CredentialMissing_ReturnsEmptyList()
     {
         var ctx = CreateContext();

@@ -209,23 +209,39 @@ public class TransactionRepository : ITransactionRepository
         if (oldToNewExternalIds == null || oldToNewExternalIds.Count == 0)
             return 0;
 
-        // EF Core 8+ ExecuteUpdate cannot translate dictionary lookups, so update per-key.
-        // Each call is a single targeted UPDATE filtered on the indexed (AccountId, ExternalId)
-        // pair, which is materially cheaper than loading rows into memory.
-        var now = DateTime.UtcNow;
-        var updated = 0;
-        foreach (var (oldId, newId) in oldToNewExternalIds)
-        {
-            if (string.IsNullOrEmpty(oldId) || string.IsNullOrEmpty(newId) || oldId == newId)
-                continue;
+        // Filter to only well-formed remap pairs (non-empty old/new, and actually changing).
+        var pairs = oldToNewExternalIds
+            .Where(kvp => !string.IsNullOrEmpty(kvp.Key) && !string.IsNullOrEmpty(kvp.Value) && kvp.Key != kvp.Value)
+            .ToList();
 
-            updated += await _context.Transactions
-                .Where(t => t.AccountId == accountId && t.ExternalId == oldId && !t.IsDeleted)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(t => t.ExternalId, newId)
-                    .SetProperty(t => t.UpdatedAt, now), ct);
+        if (pairs.Count == 0)
+            return 0;
+
+        // Single round-trip: build a VALUES (...) join that maps every (oldId, newId) pair
+        // and update Transactions in one statement. This replaces the previous per-key loop,
+        // which fired N ExecuteUpdateAsync calls.
+        var now = DateTime.UtcNow;
+
+        var sql = new System.Text.StringBuilder();
+        sql.Append("UPDATE \"Transactions\" t SET \"ExternalId\" = m.\"NewId\", \"UpdatedAt\" = {0} FROM (VALUES ");
+
+        var parameters = new List<object> { now };
+        for (var i = 0; i < pairs.Count; i++)
+        {
+            if (i > 0) sql.Append(", ");
+            var oldIdx = parameters.Count;
+            parameters.Add(pairs[i].Key);
+            var newIdx = parameters.Count;
+            parameters.Add(pairs[i].Value);
+            sql.Append("({").Append(oldIdx).Append("}, {").Append(newIdx).Append("})");
         }
-        return updated;
+
+        sql.Append(") AS m(\"OldId\", \"NewId\") ");
+        sql.Append("WHERE t.\"AccountId\" = {").Append(parameters.Count).Append("} ");
+        parameters.Add(accountId);
+        sql.Append("AND t.\"ExternalId\" = m.\"OldId\" AND t.\"IsDeleted\" = false");
+
+        return await _context.Database.ExecuteSqlRawAsync(sql.ToString(), parameters, ct);
     }
 
     public async Task DeleteByAccountIdAsync(int accountId, Guid userId)

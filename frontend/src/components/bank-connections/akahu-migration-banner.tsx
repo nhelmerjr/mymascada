@@ -72,6 +72,7 @@ export function AkahuMigrationBanner({ className }: AkahuMigrationBannerProps) {
   const [status, setStatus] = useState<AkahuMigrationStatus | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [upgradingId, setUpgradingId] = useState<number | null>(null);
+  const [isInitiatingAny, setIsInitiatingAny] = useState(false);
 
   // Read dismissal flag on mount. Done in useEffect so the initial server
   // render doesn't mismatch with the client (localStorage is client-only).
@@ -109,6 +110,7 @@ export function AkahuMigrationBanner({ className }: AkahuMigrationBannerProps) {
   }, []);
 
   const handleUpgrade = useCallback(async (connection: PendingMigrationConnection) => {
+    setIsInitiatingAny(true);
     setUpgradingId(connection.connectionId);
     try {
       const result = await apiClient.initiateAkahuConnection();
@@ -138,6 +140,7 @@ export function AkahuMigrationBanner({ className }: AkahuMigrationBannerProps) {
       toast.error(t('toasts.initiateFailed'));
     } finally {
       setUpgradingId(null);
+      setIsInitiatingAny(false);
     }
   }, [t]);
 
@@ -219,7 +222,7 @@ export function AkahuMigrationBanner({ className }: AkahuMigrationBannerProps) {
                     type="button"
                     size="sm"
                     onClick={() => handleUpgrade(connection)}
-                    disabled={upgradingId === connection.connectionId}
+                    disabled={isInitiatingAny}
                     data-testid="akahu-migration-banner-upgrade"
                     className="flex items-center gap-1.5"
                   >

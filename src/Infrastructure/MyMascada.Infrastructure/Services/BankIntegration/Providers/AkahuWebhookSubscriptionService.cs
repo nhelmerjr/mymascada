@@ -71,8 +71,14 @@ public class AkahuWebhookSubscriptionService : IAkahuWebhookSubscriptionService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "EnsureSubscriptions: ListWebhooksAsync failed for user {UserId}; proceeding with local view only", userId);
-            remoteSubscriptions = Array.Empty<AkahuWebhookSubscriptionInfo>();
+            // Bail out: treating an unreachable Akahu as "remote has no subscriptions" would
+            // tear down perfectly-good local rows. Retry on the next reconciliation cycle.
+            _logger.LogWarning(ex, "EnsureSubscriptions: ListWebhooksAsync failed for user {UserId}; aborting reconcile until Akahu is reachable", userId);
+            foreach (var webhookType in RequiredTypes)
+            {
+                failed[webhookType] = "Akahu webhooks endpoint unavailable; retrying next cycle";
+            }
+            return new EnsureSubscriptionsResult(subscribed, adopted, alreadyHealthy, failed);
         }
 
         var remoteByType = remoteSubscriptions

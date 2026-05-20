@@ -52,6 +52,10 @@ public static class BackgroundJobServiceExtensions
         services.AddScoped<MyMascada.Application.BackgroundJobs.IAkahuWebhookSubscriptionReconciliationJobService,
             MyMascada.Infrastructure.BackgroundJobs.AkahuWebhookSubscriptionReconciliationJobService>();
 
+        // Akahu classic→official migration service (fire-and-forget enqueue from webhook/OAuth)
+        services.AddScoped<MyMascada.Application.BackgroundJobs.IAkahuMigrationJobService,
+            MyMascada.Infrastructure.BackgroundJobs.AkahuMigrationJobService>();
+
         // Rule suggestion generation job service
         services.AddScoped<MyMascada.Application.BackgroundJobs.IRuleSuggestionGenerationJobService,
             MyMascada.Infrastructure.BackgroundJobs.RuleSuggestionGenerationJobService>();

@@ -21,7 +21,7 @@ public class AkahuWebhookSubscriptionRepository : IAkahuWebhookSubscriptionRepos
     public async Task<IReadOnlyList<AkahuWebhookSubscription>> GetByUserIdAsync(Guid userId, CancellationToken ct = default)
     {
         return await _context.AkahuWebhookSubscriptions
-            .Where(s => s.UserId == userId)
+            .Where(s => s.UserId == userId && !s.IsDeleted)
             .ToListAsync(ct);
     }
 
@@ -29,7 +29,7 @@ public class AkahuWebhookSubscriptionRepository : IAkahuWebhookSubscriptionRepos
     public async Task<AkahuWebhookSubscription?> GetByWebhookIdAsync(string webhookId, CancellationToken ct = default)
     {
         return await _context.AkahuWebhookSubscriptions
-            .FirstOrDefaultAsync(s => s.WebhookId == webhookId, ct);
+            .FirstOrDefaultAsync(s => s.WebhookId == webhookId && !s.IsDeleted, ct);
     }
 
     /// <inheritdoc />

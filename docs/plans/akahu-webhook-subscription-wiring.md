@@ -132,7 +132,7 @@ Three options were considered:
 
 **Schema** (`src/Core/MyMascada.Domain/Entities/AkahuWebhookSubscription.cs`):
 
-```
+```text
 class AkahuWebhookSubscription : BaseEntity (int id, soft-delete inherited)
     Guid     UserId               (FK semantics; also indexed on AkahuUserCredentialId)
     int      AkahuUserCredentialId

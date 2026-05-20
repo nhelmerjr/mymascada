@@ -1,5 +1,6 @@
 using MediatR;
 using MyMascada.Application.Common.Interfaces;
+using MyMascada.Application.Features.BankConnections.DTOs;
 
 namespace MyMascada.Application.Features.BankConnections.Commands;
 
@@ -35,6 +36,7 @@ public class MigrateAkahuConnectionCommandHandler
     private readonly IAkahuApiClient _akahuApiClient;
     private readonly ITransactionRepository _transactionRepository;
     private readonly ISettingsEncryptionService _encryptionService;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IApplicationLogger<MigrateAkahuConnectionCommandHandler> _logger;
 
     public MigrateAkahuConnectionCommandHandler(
@@ -43,6 +45,7 @@ public class MigrateAkahuConnectionCommandHandler
         IAkahuApiClient akahuApiClient,
         ITransactionRepository transactionRepository,
         ISettingsEncryptionService encryptionService,
+        IUnitOfWork unitOfWork,
         IApplicationLogger<MigrateAkahuConnectionCommandHandler> logger)
     {
         _bankConnectionRepository = bankConnectionRepository ?? throw new ArgumentNullException(nameof(bankConnectionRepository));
@@ -50,6 +53,7 @@ public class MigrateAkahuConnectionCommandHandler
         _akahuApiClient = akahuApiClient ?? throw new ArgumentNullException(nameof(akahuApiClient));
         _transactionRepository = transactionRepository ?? throw new ArgumentNullException(nameof(transactionRepository));
         _encryptionService = encryptionService ?? throw new ArgumentNullException(nameof(encryptionService));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -102,6 +106,31 @@ public class MigrateAkahuConnectionCommandHandler
         {
             _logger.LogError(ex, "Migrate Akahu connection {ConnectionId}: failed to decrypt Akahu credentials", connection.Id);
             return new MigrateAkahuConnectionResult(false, oldExternalAccountId, null, 0, "Akahu credentials could not be decrypted");
+        }
+
+        // Decrypt EncryptedSettings up front so we fail fast (before any expensive Akahu
+        // API calls) if Data Protection keys have rotated and rendered the blob unreadable.
+        AkahuConnectionSettings existingSettings;
+        if (!string.IsNullOrEmpty(connection.EncryptedSettings))
+        {
+            try
+            {
+                existingSettings = _encryptionService.DecryptSettings<AkahuConnectionSettings>(connection.EncryptedSettings)
+                    ?? new AkahuConnectionSettings();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Migrate Akahu connection {ConnectionId}: failed to decrypt EncryptedSettings", connection.Id);
+                connection.IsActive = false;
+                connection.LastSyncError = "Settings could not be decrypted; please re-link this account.";
+                connection.UpdatedAt = DateTime.UtcNow;
+                await _bankConnectionRepository.UpdateAsync(connection, cancellationToken);
+                return new MigrateAkahuConnectionResult(false, oldExternalAccountId, null, 0, "Connection settings could not be decrypted");
+            }
+        }
+        else
+        {
+            existingSettings = new AkahuConnectionSettings();
         }
 
         IReadOnlyList<AkahuAccountInfo> accounts;
@@ -172,19 +201,23 @@ public class MigrateAkahuConnectionCommandHandler
         connection.LastMigratedAt = DateTime.UtcNow;
         connection.UpdatedAt = DateTime.UtcNow;
 
-        var existingSettings = !string.IsNullOrEmpty(connection.EncryptedSettings)
-            ? _encryptionService.DecryptSettings<AkahuConnectionSettings>(connection.EncryptedSettings)
-            : null;
-        var updatedSettings = existingSettings ?? new AkahuConnectionSettings();
-        updatedSettings.AkahuAccountId = newAccountId;
-        connection.EncryptedSettings = _encryptionService.EncryptSettings(updatedSettings);
+        existingSettings.AkahuAccountId = newAccountId;
+        connection.EncryptedSettings = _encryptionService.EncryptSettings(existingSettings);
 
-        await _bankConnectionRepository.UpdateAsync(connection, cancellationToken);
-
+        // Wrap the connection update and transaction remap in a single DB transaction so a
+        // failure during remap leaves the connection still pointing at the old ExternalAccountId
+        // (which the next sync will retry) rather than at the new one with stale transaction rows.
         var remapped = 0;
-        if (idMap.Count > 0)
+        await using (var tx = await _unitOfWork.BeginTransactionAsync(cancellationToken))
         {
-            remapped = await _transactionRepository.RemapExternalIdsAsync(connection.AccountId, idMap, cancellationToken);
+            await _bankConnectionRepository.UpdateAsync(connection, cancellationToken);
+
+            if (idMap.Count > 0)
+            {
+                remapped = await _transactionRepository.RemapExternalIdsAsync(connection.AccountId, idMap, cancellationToken);
+            }
+
+            await tx.CommitAsync(cancellationToken);
         }
 
         // TODO(akahu-migration follow-up PR): rewrite trans_xxx values embedded in
@@ -202,12 +235,5 @@ public class MigrateAkahuConnectionCommandHandler
             newAccountId,
             remapped,
             null);
-    }
-
-    private sealed class AkahuConnectionSettings
-    {
-        public string AkahuAccountId { get; set; } = string.Empty;
-        public string? LastSyncedTransactionId { get; set; }
-        public DateTime? LastSyncTimestamp { get; set; }
     }
 }
