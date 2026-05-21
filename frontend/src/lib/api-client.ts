@@ -14,6 +14,7 @@ import {
   SaveAkahuCredentialsRequest,
   SaveAkahuCredentialsResult,
   AkahuMigrationStatus,
+  MigrateAkahuConnectionResult,
 } from '@/types/bank-connections';
 import {
   BudgetSummary,
@@ -1638,6 +1639,17 @@ class ApiClient {
    */
   async getAkahuMigrationStatus(): Promise<AkahuMigrationStatus> {
     return this.request('/api/BankConnections/akahu/migration-status');
+  }
+
+  /**
+   * Triggers the classic→official migration for a single Akahu connection.
+   * Used by the migration banner in Personal App mode (no OAuth re-auth step).
+   * Backed by POST /api/BankConnections/akahu/connections/{id}/migrate.
+   */
+  async migrateAkahuConnection(connectionId: number): Promise<MigrateAkahuConnectionResult> {
+    return this.request(`/api/BankConnections/akahu/connections/${connectionId}/migrate`, {
+      method: 'POST',
+    });
   }
 
   async saveAkahuCredentials(request: SaveAkahuCredentialsRequest): Promise<SaveAkahuCredentialsResult> {
