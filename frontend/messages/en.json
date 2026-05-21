@@ -3067,7 +3067,25 @@
     "appTokenHint": "Starts with \"app_token_\"",
     "userTokenHint": "Starts with \"user_token_\"",
     "verifying": "Verifying...",
-    "saveAndContinue": "Save & Continue"
+    "saveAndContinue": "Save & Continue",
+    "akahuMigration": {
+      "ariaLabel": "Action required: re-authorise your bank connections",
+      "heading": "Action required: re-authorise your bank connections",
+      "body": "Akahu is migrating ANZ, ASB, BNZ and Westpac to official open banking. Re-authorise each connection below to keep your transactions syncing. {daysRemaining, plural, =0 {Deadline is today.} =1 {1 day remaining.} other {# days remaining.}}",
+      "upgrade": "Upgrade",
+      "upgrading": "Opening Akahu...",
+      "dismiss": "Dismiss for today",
+      "row": {
+        "unknownBank": "Bank connection",
+        "lastSynced": "{days, plural, =0 {Last synced today} =1 {Last synced 1 day ago} other {Last synced # days ago}}",
+        "neverSynced": "Never synced"
+      },
+      "toasts": {
+        "initiateFailed": "Could not start the Akahu upgrade. Please try again.",
+        "credentialsMissing": "Set up your Akahu credentials on this page first, then click Upgrade again.",
+        "personalAppFallback": "Open the Connect Bank flow above to relink your migrated account."
+      }
+    }
   },
   "budgets": {
     "title": "Budgets",

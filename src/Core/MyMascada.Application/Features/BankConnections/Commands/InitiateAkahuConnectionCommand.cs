@@ -50,6 +50,25 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
         _logger.LogInformation("Initiating Akahu connection for user {UserId}", request.UserId);
 
         var mode = _modeResolver.Resolve("akahu");
+
+        // If the user already has valid (non-revoked) credentials, fetch accounts directly
+        // instead of forcing another OAuth round-trip. This applies to both hosted_oauth
+        // and personal_app modes — once authorized, the user shouldn't have to re-authorize
+        // just to link an additional account.
+        var credential = await _credentialRepository.GetByUserIdAsync(request.UserId, cancellationToken);
+        var hasUsableCredential = credential != null && credential.ConsentRevokedAt == null;
+
+        if (hasUsableCredential)
+        {
+            var reuseResult = await TryReuseExistingCredentialsAsync(credential!, request.UserId, mode.DefaultMode, cancellationToken);
+            if (reuseResult != null)
+            {
+                return reuseResult;
+            }
+            // Token couldn't be decrypted or was rejected by Akahu — fall through to
+            // a fresh authorization flow appropriate to the configured mode.
+        }
+
         if (mode.DefaultMode == "hosted_oauth")
         {
             var state = Guid.NewGuid().ToString("N");
@@ -65,22 +84,26 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
             };
         }
 
-        // Check if user has stored credentials
-        var credential = await _credentialRepository.GetByUserIdAsync(request.UserId, cancellationToken);
-
-        if (credential == null)
+        _logger.LogInformation("User {UserId} has no Akahu credentials - setup required", request.UserId);
+        return new InitiateConnectionResult
         {
-            // User needs to set up credentials first
-            _logger.LogInformation("User {UserId} has no Akahu credentials - setup required", request.UserId);
-            return new InitiateConnectionResult
-            {
-                RequiresCredentials = true,
-                IsPersonalAppMode = true // We only support Personal App mode
-            };
-        }
+            RequiresCredentials = true,
+            IsPersonalAppMode = true
+        };
+    }
 
-        // User has credentials - decrypt them and fetch accounts
-        _logger.LogInformation("User {UserId} has Akahu credentials - fetching available accounts", request.UserId);
+    /// <summary>
+    /// Attempts to fetch the user's available Akahu accounts using their existing stored credentials.
+    /// Returns null if the credentials are unusable (decryption failure or rejected by Akahu) — the
+    /// caller should then fall back to a fresh authorization flow.
+    /// </summary>
+    private async Task<InitiateConnectionResult?> TryReuseExistingCredentialsAsync(
+        Domain.Entities.AkahuUserCredential credential,
+        Guid userId,
+        string mode,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("User {UserId} has Akahu credentials - fetching available accounts without re-auth", userId);
 
         string? appIdToken;
         string? userToken;
@@ -91,20 +114,22 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
         }
         catch (Exception ex)
         {
-            // Decryption failed - Data Protection keys may have changed (e.g., after deployment)
-            // Mark credentials as needing re-setup
-            _logger.LogWarning(ex, "Failed to decrypt Akahu credentials for user {UserId} - keys may have changed", request.UserId);
-
+            // Decryption failed - Data Protection keys may have changed (e.g., after deployment).
+            _logger.LogWarning(ex, "Failed to decrypt Akahu credentials for user {UserId} - keys may have changed", userId);
             credential.LastValidationError = "Credentials could not be decrypted. Please re-enter your tokens.";
             credential.UpdatedAt = DateTime.UtcNow;
             await _credentialRepository.UpdateAsync(credential, cancellationToken);
 
-            return new InitiateConnectionResult
+            if (mode == "personal_tokens")
             {
-                RequiresCredentials = true,
-                IsPersonalAppMode = true,
-                CredentialsError = "Your stored credentials could not be decrypted. This can happen after system updates. Please re-enter your App Token and User Token."
-            };
+                return new InitiateConnectionResult
+                {
+                    RequiresCredentials = true,
+                    IsPersonalAppMode = true,
+                    CredentialsError = "Your stored credentials could not be decrypted. This can happen after system updates. Please re-enter your App Token and User Token."
+                };
+            }
+            return null; // OAuth mode → caller will produce a fresh authorization URL.
         }
 
         IReadOnlyList<AkahuAccountInfo> accounts;
@@ -114,29 +139,30 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
         }
         catch (UnauthorizedAccessException ex)
         {
-            // Credentials may have been revoked - mark as needing re-setup
-            _logger.LogWarning(ex, "Akahu credentials invalid for user {UserId}", request.UserId);
-
-            // Update credential with validation error
-            credential.LastValidationError = "Credentials are no longer valid. Please re-enter your tokens.";
+            // Tokens have been revoked or expired upstream.
+            _logger.LogWarning(ex, "Akahu credentials invalid for user {UserId}", userId);
+            credential.LastValidationError = "Credentials are no longer valid. Please re-authorize.";
             credential.UpdatedAt = DateTime.UtcNow;
             await _credentialRepository.UpdateAsync(credential, cancellationToken);
 
-            return new InitiateConnectionResult
+            if (mode == "personal_tokens")
             {
-                RequiresCredentials = true,
-                IsPersonalAppMode = true,
-                CredentialsError = "Your Akahu credentials are no longer valid. Please re-enter your App Token and User Token."
-            };
+                return new InitiateConnectionResult
+                {
+                    RequiresCredentials = true,
+                    IsPersonalAppMode = true,
+                    CredentialsError = "Your Akahu credentials are no longer valid. Please re-enter your App Token and User Token."
+                };
+            }
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to fetch Akahu accounts for user {UserId}", request.UserId);
+            _logger.LogError(ex, "Failed to fetch Akahu accounts for user {UserId}", userId);
             throw new InvalidOperationException("Failed to connect to Akahu. Please try again later.", ex);
         }
 
-        // Get existing connections to mark already linked accounts
-        var existingConnections = await _bankConnectionRepository.GetByUserIdAsync(request.UserId, cancellationToken);
+        var existingConnections = await _bankConnectionRepository.GetByUserIdAsync(userId, cancellationToken);
         var linkedExternalIds = existingConnections
             .Where(c => c.ProviderId == "akahu")
             .Select(c => c.ExternalAccountId)
@@ -154,7 +180,6 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
             IsAlreadyLinked = linkedExternalIds.Contains(a.Id)
         });
 
-        // Update last validated timestamp
         credential.LastValidatedAt = DateTime.UtcNow;
         credential.LastValidationError = null;
         credential.UpdatedAt = DateTime.UtcNow;
@@ -162,6 +187,9 @@ public class InitiateAkahuConnectionCommandHandler : IRequestHandler<InitiateAka
 
         return new InitiateConnectionResult
         {
+            // IsPersonalAppMode=true tells the frontend "use the inline accounts" — this
+            // is the same shape the frontend already handles for personal-app mode, so
+            // reusing it avoids a new code path on the client.
             IsPersonalAppMode = true,
             RequiresCredentials = false,
             AvailableAccounts = accountDtos

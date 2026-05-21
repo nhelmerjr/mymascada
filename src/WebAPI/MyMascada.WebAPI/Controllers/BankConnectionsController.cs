@@ -116,6 +116,19 @@ public class BankConnectionsController : ControllerBase
     }
 
     /// <summary>
+    /// Returns the user's Akahu connections that still need to be migrated to the official
+    /// open-banking equivalent before the 24 May 2026 cut-over. Drives the in-app upgrade banner.
+    /// </summary>
+    [HttpGet("akahu/migration-status")]
+    [ProducesResponseType(typeof(AkahuMigrationStatusDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AkahuMigrationStatusDto>> GetAkahuMigrationStatus()
+    {
+        var query = new GetAkahuMigrationStatusQuery(_currentUserService.GetUserId());
+        var result = await _mediator.Send(query);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Saves or updates the user's Akahu credentials.
     /// Validates the credentials against the Akahu API before saving.
     /// </summary>

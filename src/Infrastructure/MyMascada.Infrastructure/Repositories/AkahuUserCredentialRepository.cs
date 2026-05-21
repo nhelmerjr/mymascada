@@ -62,6 +62,14 @@ public class AkahuUserCredentialRepository : IAkahuUserCredentialRepository
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<AkahuUserCredential>> GetActiveCredentialsAsync(CancellationToken ct = default)
+    {
+        return await _context.AkahuUserCredentials
+            .Where(c => !c.IsDeleted && c.ConsentRevokedAt == null)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc />
     public async Task UpdateRevocationStateAsync(int credentialId, bool isRevocationPending, int revocationFailureCount, DateTime? revocationFailedAt, CancellationToken ct = default)
     {
         await _context.AkahuUserCredentials

@@ -362,6 +362,77 @@ namespace MyMascada.WebAPI.Migrations
                     b.ToTable("AkahuUserCredentials");
                 });
 
+            modelBuilder.Entity("MyMascada.Domain.Entities.AkahuWebhookSubscription", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AkahuUserCredentialId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LastReconcileError")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("LastReconciledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("State")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("SubscribedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("WebhookId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("WebhookType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AkahuUserCredentialId");
+
+                    b.HasIndex("WebhookId")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = false");
+
+                    b.HasIndex("UserId", "WebhookType")
+                        .IsUnique()
+                        .HasFilter("\"IsDeleted\" = false");
+
+                    b.ToTable("AkahuWebhookSubscriptions");
+                });
+
             modelBuilder.Entity("MyMascada.Domain.Entities.BankCategoryMapping", b =>
                 {
                     b.Property<int>("Id")
@@ -486,6 +557,9 @@ namespace MyMascada.WebAPI.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastMigratedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("LastSyncAt")
                         .HasColumnType("timestamp with time zone");
@@ -3203,6 +3277,15 @@ namespace MyMascada.WebAPI.Migrations
                     b.Navigation("SharedByUser");
 
                     b.Navigation("SharedWithUser");
+                });
+
+            modelBuilder.Entity("MyMascada.Domain.Entities.AkahuWebhookSubscription", b =>
+                {
+                    b.HasOne("MyMascada.Domain.Entities.AkahuUserCredential", null)
+                        .WithMany()
+                        .HasForeignKey("AkahuUserCredentialId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("MyMascada.Domain.Entities.BankCategoryMapping", b =>

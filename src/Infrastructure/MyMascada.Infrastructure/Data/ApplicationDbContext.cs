@@ -31,6 +31,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<BankConnection> BankConnections => Set<BankConnection>();
     public DbSet<BankSyncLog> BankSyncLogs => Set<BankSyncLog>();
     public DbSet<AkahuUserCredential> AkahuUserCredentials => Set<AkahuUserCredential>();
+    public DbSet<AkahuWebhookSubscription> AkahuWebhookSubscriptions => Set<AkahuWebhookSubscription>();
     public DbSet<BankCategoryMapping> BankCategoryMappings => Set<BankCategoryMapping>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
@@ -460,6 +461,35 @@ public class ApplicationDbContext : DbContext
 
             // Unique constraint: one credential per user (user can only have one Akahu Personal App)
             entity.HasIndex(e => e.UserId).IsUnique();
+
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // AkahuWebhookSubscription configuration
+        modelBuilder.Entity<AkahuWebhookSubscription>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.AkahuUserCredentialId).IsRequired();
+            entity.Property(e => e.WebhookId).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.WebhookType).IsRequired().HasMaxLength(40);
+            entity.Property(e => e.State).HasMaxLength(100);
+            entity.Property(e => e.LastReconcileError).HasMaxLength(500);
+
+            // Both unique indexes are filtered to non-deleted rows: the entity is
+            // soft-deleted, and reconciliation re-subscribes (re-using a WebhookId)
+            // after a partial teardown — an unfiltered constraint would block that.
+            entity.HasIndex(e => e.WebhookId)
+                .IsUnique()
+                .HasFilter("\"IsDeleted\" = false");
+            entity.HasIndex(e => new { e.UserId, e.WebhookType })
+                .IsUnique()
+                .HasFilter("\"IsDeleted\" = false");
+
+            entity.HasOne<AkahuUserCredential>()
+                .WithMany()
+                .HasForeignKey(e => e.AkahuUserCredentialId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasQueryFilter(e => !e.IsDeleted);
         });

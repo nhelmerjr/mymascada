@@ -210,6 +210,100 @@ public class AkahuApiClientTests
                  value.Contains(sensitiveTokenFragment, StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public async Task SubscribeToWebhook_ItemIdResponseShape_ReturnsParsedSubscription()
+    {
+        // Empirically confirmed shape returned by Akahu's POST /webhooks (2026-05-17):
+        // { "success": true, "item_id": "hook_xxx" }
+        var responseJson = "{\"success\":true,\"item_id\":\"hook_realworld_1\"}";
+        var handler = new DelegatingHandlerStub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson, Encoding.UTF8, "application/json")
+        }));
+        var client = CreateClient(handler);
+
+        var result = await client.SubscribeToWebhookAsync(TestAppToken, "user_token", "TOKEN", "user_guid");
+
+        result.Id.Should().Be("hook_realworld_1");
+        result.WebhookType.Should().Be("TOKEN");
+        result.State.Should().Be("user_guid");
+    }
+
+    [Fact]
+    public async Task SubscribeToWebhook_EnvelopeResponseShape_ReturnsParsedSubscription()
+    {
+        // Akahu's documented response: { "success": true, "item": { "_id": ..., "webhook_type": ..., "state": ... } }
+        var responseJson = "{\"success\":true,\"item\":{\"_id\":\"whk_envelope_1\",\"webhook_type\":\"ACCOUNT\",\"state\":\"user_guid\"}}";
+        var handler = new DelegatingHandlerStub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson, Encoding.UTF8, "application/json")
+        }));
+        var client = CreateClient(handler);
+
+        var result = await client.SubscribeToWebhookAsync(TestAppToken, "user_token", "ACCOUNT", "user_guid");
+
+        result.Id.Should().Be("whk_envelope_1");
+        result.WebhookType.Should().Be("ACCOUNT");
+        result.State.Should().Be("user_guid");
+    }
+
+    [Fact]
+    public async Task SubscribeToWebhook_BareObjectResponseShape_ReturnsParsedSubscription()
+    {
+        // Regression: previously a bare-object response caused ObjectDisposedException because the
+        // code re-read response.Content after the envelope attempt had consumed the stream.
+        var responseJson = "{\"_id\":\"whk_bare_2\",\"webhook_type\":\"TRANSACTION\",\"state\":\"user_guid\"}";
+        var handler = new DelegatingHandlerStub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson, Encoding.UTF8, "application/json")
+        }));
+        var client = CreateClient(handler);
+
+        var result = await client.SubscribeToWebhookAsync(TestAppToken, "user_token", "TRANSACTION", "user_guid");
+
+        result.Id.Should().Be("whk_bare_2");
+        result.WebhookType.Should().Be("TRANSACTION");
+        result.State.Should().Be("user_guid");
+    }
+
+    [Fact]
+    public async Task SubscribeToWebhook_ResponseWithoutId_ThrowsAkahuApiException()
+    {
+        var responseJson = "{\"success\":true,\"item\":{\"webhook_type\":\"TOKEN\"}}";
+        var handler = new DelegatingHandlerStub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson, Encoding.UTF8, "application/json")
+        }));
+        var client = CreateClient(handler);
+
+        Func<Task> act = async () =>
+            await client.SubscribeToWebhookAsync(TestAppToken, "user_token", "TOKEN", "user_guid");
+
+        var ex = await act.Should().ThrowAsync<AkahuApiException>();
+        ex.Which.Message.Should().Contain("unexpected shape");
+    }
+
+    [Fact]
+    public async Task SubscribeToWebhook_ResponseWithoutId_ExceptionMessageDoesNotIncludeBody()
+    {
+        // The Akahu response body echoes the request state (= user GUID). It must not bleed
+        // into the exception message; the structured logger receives it instead.
+        var stateValue = "user_guid_12345_secret";
+        var responseJson = "{\"success\":true,\"item\":{\"webhook_type\":\"TOKEN\",\"state\":\"" + stateValue + "\"}}";
+        var handler = new DelegatingHandlerStub((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(responseJson, Encoding.UTF8, "application/json")
+        }));
+        var client = CreateClient(handler);
+
+        Func<Task> act = async () =>
+            await client.SubscribeToWebhookAsync(TestAppToken, "user_token", "TOKEN", stateValue);
+
+        var ex = await act.Should().ThrowAsync<AkahuApiException>();
+        ex.Which.Message.Should().NotContain(stateValue);
+        ex.Which.Message.Should().NotContain("success");
+    }
+
     private static AkahuApiClient CreateClient(DelegatingHandlerStub handler)
     {
         return CreateClientWithLogger(handler).Client;
