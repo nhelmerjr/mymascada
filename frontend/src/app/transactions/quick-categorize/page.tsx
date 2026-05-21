@@ -12,7 +12,7 @@ import {
 import { AppLayout } from '@/components/app-layout';
 import { BackButton } from '@/components/ui/back-button';
 import { Button } from '@/components/ui/button';
-import { Select } from '@/components/ui/select';
+import { CategoryPicker } from '@/components/forms/category-picker';
 import { apiClient } from '@/lib/api-client';
 import type { UncategorizedGroupDto, UncategorizedGroupsResponse } from '@/lib/api-client';
 import { useAuth } from '@/contexts/auth-context';
@@ -23,7 +23,8 @@ interface CategoryOption {
   id: number;
   name: string;
   fullPath?: string;
-  parentId?: number | null;
+  parentId: number | null;
+  canonicalKey?: string;
 }
 
 /**
@@ -77,7 +78,12 @@ export default function QuickCategorizePage() {
         const typed = groupsRes as UncategorizedGroupsResponse;
         setGroups(typed.groups || []);
         setCategories(
-          (categoriesRes || []).filter((c) => c && c.id != null),
+          (categoriesRes || [])
+            .filter((c) => c && c.id != null)
+            .map((c) => ({
+              ...c,
+              parentId: c.parentId ?? null,
+            })),
         );
       } catch (err) {
         console.error('Failed to load quick-categorize data:', err);
@@ -486,33 +492,20 @@ export default function QuickCategorizePage() {
             )}
 
             {/* Category picker */}
-            <div className="mt-6">
+            <div className="mt-6" data-testid="quick-categorize-category-select">
               <label
                 htmlFor="quick-categorize-category"
                 className="mb-2 block text-sm font-semibold text-ink-800"
               >
                 {t('selectCategory')}
               </label>
-              <Select
-                id="quick-categorize-category"
+              <CategoryPicker
                 value={selectedCategoryId}
-                onChange={(e) => setSelectedCategoryId(e.target.value)}
-                data-testid="quick-categorize-category-select"
-              >
-                {/*
-                  Explicit empty option (instead of the shared Select's
-                  `placeholder` prop, which renders a disabled row) so the
-                  user can clear their choice after picking a category. The
-                  submit button is already disabled when selectedCategoryId
-                  is falsy, so re-selecting the empty row is a valid "undo".
-                */}
-                <option value="">{t('selectCategory')}</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.fullPath || category.name}
-                  </option>
-                ))}
-              </Select>
+                onChange={(categoryId) => setSelectedCategoryId(String(categoryId))}
+                categories={categories}
+                placeholder={t('selectCategory')}
+                showAiSuggestions={false}
+              />
             </div>
 
             {/* Hint */}
