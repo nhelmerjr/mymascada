@@ -49,6 +49,20 @@ public class BankSyncService : IBankSyncService
     /// </summary>
     private const decimal AutoCategorizeMinConfidence = 0.9m;
 
+    /// <summary>
+    /// Confidence at or above which a potential duplicate is skipped during a normal sync.
+    /// </summary>
+    private const decimal DuplicateSkipConfidence = 0.95m;
+
+    /// <summary>
+    /// Lowered skip confidence used inside the post-migration window. Akahu re-emits
+    /// historical transactions with date/description drift that caps the fuzzy-match
+    /// confidence (see ImportAnalysisService) well below the normal 0.95 bar — a 1-day
+    /// date drift with an exact-amount match maxes out around 0.8 — so without this the
+    /// widened tolerances would flag the re-imports but never actually suppress them.
+    /// </summary>
+    private const decimal MigrationDuplicateSkipConfidence = 0.60m;
+
     public BankSyncService(
         IBankProviderFactory providerFactory,
         IBankConnectionRepository connectionRepository,
@@ -171,6 +185,13 @@ public class BankSyncService : IBankSyncService
                     IncludeRecentImports = true
                 };
 
+            // The skip bar moves with the tolerance: a normal sync demands near-certain
+            // matches, but during the migration window the confidence formula cannot
+            // reach 0.95 for a drifted re-import, so the bar drops to match.
+            var duplicateSkipConfidence = usesMigrationFallback
+                ? MigrationDuplicateSkipConfidence
+                : DuplicateSkipConfidence;
+
             var analysisRequest = new AnalyzeImportRequest
             {
                 Source = "bankapi",
@@ -222,7 +243,7 @@ public class BankSyncService : IBankSyncService
                 // Check for exact duplicates (same external reference ID) or other high-confidence duplicates
                 var hasExactDuplicate = item.Conflicts.Any(c =>
                     c.Type == ConflictType.ExactDuplicate ||
-                    (c.Type == ConflictType.PotentialDuplicate && c.ConfidenceScore >= 0.95m));
+                    (c.Type == ConflictType.PotentialDuplicate && c.ConfidenceScore >= duplicateSkipConfidence));
 
                 if (hasExactDuplicate)
                 {

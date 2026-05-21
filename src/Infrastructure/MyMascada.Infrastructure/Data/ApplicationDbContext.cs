@@ -476,7 +476,12 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.State).HasMaxLength(100);
             entity.Property(e => e.LastReconcileError).HasMaxLength(500);
 
-            entity.HasIndex(e => e.WebhookId).IsUnique();
+            // Both unique indexes are filtered to non-deleted rows: the entity is
+            // soft-deleted, and reconciliation re-subscribes (re-using a WebhookId)
+            // after a partial teardown — an unfiltered constraint would block that.
+            entity.HasIndex(e => e.WebhookId)
+                .IsUnique()
+                .HasFilter("\"IsDeleted\" = false");
             entity.HasIndex(e => new { e.UserId, e.WebhookType })
                 .IsUnique()
                 .HasFilter("\"IsDeleted\" = false");
