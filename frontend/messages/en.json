@@ -2705,6 +2705,16 @@
   "analytics": {
     "title": "Financial Analytics",
     "subtitle": "Comprehensive insights into your spending patterns and financial trends",
+    "categoryFilter": {
+      "title": "Filter categories",
+      "allCategories": "All categories",
+      "nSelected": "{count} of {total} categories",
+      "nOfTotal": "{count}/{total}",
+      "search": "Search categories...",
+      "selectAll": "Select all",
+      "clear": "Clear",
+      "noMatches": "No matching categories"
+    },
     "dateRange": "Date Range",
     "compareWith": "Compare With",
     "previousPeriod": "Previous Period",

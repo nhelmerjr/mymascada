@@ -9,6 +9,12 @@ public class GetMonthlySummaryQuery : IRequest<MonthlySummaryDto>
     public Guid UserId { get; set; }
     public int Year { get; set; }
     public int Month { get; set; }
+
+    /// <summary>
+    /// Optional category filter. When set, only transactions in these categories are considered.
+    /// Null/empty means all categories (no filtering).
+    /// </summary>
+    public List<int>? CategoryIds { get; set; }
 }
 
 public class GetMonthlySummaryQueryHandler : IRequestHandler<GetMonthlySummaryQuery, MonthlySummaryDto>
@@ -33,6 +39,14 @@ public class GetMonthlySummaryQueryHandler : IRequestHandler<GetMonthlySummaryQu
             monthEnd);
         
         var transactionList = monthlyTransactions.ToList();
+
+        // Apply optional category filter (only transactions in the selected categories count).
+        if (request.CategoryIds != null && request.CategoryIds.Any())
+        {
+            transactionList = transactionList
+                .Where(t => t.Category != null && request.CategoryIds.Contains(t.Category.Id))
+                .ToList();
+        }
 
         // Calculate totals (excluding transfers)
         var totalIncome = transactionList

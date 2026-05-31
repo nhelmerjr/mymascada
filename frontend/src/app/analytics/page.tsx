@@ -7,6 +7,8 @@ import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
 import { CategorySpendingChart } from '@/components/charts/category-spending-chart';
 import { PeriodSelector, PeriodType } from '@/components/analytics/period-selector';
+import { CategoryFilter } from '@/components/analytics/category-filter';
+import { useAnalyticsCategoryFilter } from '@/hooks/use-analytics-category-filter';
 import { apiClient } from '@/lib/api-client';
 import { cn, formatCurrency } from '@/lib/utils';
 import { useAuthGuard } from '@/hooks/use-auth-guard';
@@ -115,18 +117,21 @@ export default function AnalyticsPage() {
   const [loadingTrends, setLoadingTrends] = useState(true);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [timeRange, setTimeRange] = useState<PeriodType>('year');
+  const categoryFilter = useAnalyticsCategoryFilter();
+  const { categoryIdsParam } = categoryFilter;
 
   useEffect(() => {
-    if (isAuthResolved) {
-      loadAnalyticsData();
+    if (isAuthResolved && categoryFilter.loaded) {
+      loadAnalyticsData(categoryIdsParam);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthResolved, selectedYear, selectedMonth, timeRange]);
+  }, [isAuthResolved, selectedYear, selectedMonth, timeRange, categoryFilter.loaded, categoryIdsParam]);
 
   const loadAnalyticsSummary = async (
     range: PeriodType,
     year: number,
     month: number,
+    categoryIds?: string,
   ) => {
     setLoadingTrends(true);
     try {
@@ -134,6 +139,7 @@ export default function AnalyticsPage() {
         period: range,
         year,
         month,
+        categoryIds,
       });
 
       setAnalyticsSummary(summary);
@@ -162,13 +168,13 @@ export default function AnalyticsPage() {
     }
   };
 
-  const loadCategoryData = async (range: PeriodType, year: number, month: number) => {
+  const loadCategoryData = async (range: PeriodType, year: number, month: number, categoryIds?: string) => {
     setLoadingCategories(true);
     try {
       const selectedQuarter = Math.ceil(month / 3);
       const quarterStartMonth = (selectedQuarter - 1) * 3 + 1;
       const categoryMonth = range === 'quarter' ? quarterStartMonth : month;
-      const currentSummary = (await apiClient.getMonthlySummary(year, categoryMonth)) as MonthlySummary;
+      const currentSummary = (await apiClient.getMonthlySummary(year, categoryMonth, categoryIds)) as MonthlySummary;
       setCategoryData(currentSummary?.topCategories ?? []);
     } catch (error) {
       console.error('Failed to load category data:', error);
@@ -177,9 +183,9 @@ export default function AnalyticsPage() {
     }
   };
 
-  const loadAnalyticsData = () => {
-    loadAnalyticsSummary(timeRange, selectedYear, selectedMonth);
-    loadCategoryData(timeRange, selectedYear, selectedMonth);
+  const loadAnalyticsData = (categoryIds?: string) => {
+    loadAnalyticsSummary(timeRange, selectedYear, selectedMonth, categoryIds);
+    loadCategoryData(timeRange, selectedYear, selectedMonth, categoryIds);
   };
 
   const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
@@ -239,12 +245,26 @@ export default function AnalyticsPage() {
           <p className="mt-1.5 text-[15px] text-ink-500">{t('subtitle')}</p>
         </div>
 
-        <Link href="/analytics/trends">
-          <Button variant="outline" className="gap-2">
-            {t('categoryTrends.viewCategoryTrends')}
-            <ArrowRightIcon className="h-4 w-4" />
-          </Button>
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <CategoryFilter
+            categories={categoryFilter.categories}
+            selectedSet={categoryFilter.selectedSet}
+            childrenByParent={categoryFilter.childrenByParent}
+            isAllSelected={categoryFilter.isAllSelected}
+            selectedCount={categoryFilter.selectedIds.length}
+            totalCount={categoryFilter.categories.length}
+            onToggle={categoryFilter.toggleCategory}
+            onSelectAll={categoryFilter.selectAll}
+            onClear={categoryFilter.clear}
+          />
+
+          <Link href="/analytics/trends">
+            <Button variant="outline" className="gap-2">
+              {t('categoryTrends.viewCategoryTrends')}
+              <ArrowRightIcon className="h-4 w-4" />
+            </Button>
+          </Link>
+        </div>
       </header>
 
       <PeriodSelector

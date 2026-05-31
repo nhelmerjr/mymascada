@@ -2705,6 +2705,16 @@
   "analytics": {
     "title": "Análises Financeiras",
     "subtitle": "Insights abrangentes sobre seus padrões de gastos e tendências financeiras",
+    "categoryFilter": {
+      "title": "Filtrar categorias",
+      "allCategories": "Todas as categorias",
+      "nSelected": "{count} de {total} categorias",
+      "nOfTotal": "{count}/{total}",
+      "search": "Buscar categorias...",
+      "selectAll": "Selecionar tudo",
+      "clear": "Limpar",
+      "noMatches": "Nenhuma categoria encontrada"
+    },
     "dateRange": "Período",
     "compareWith": "Comparar Com",
     "previousPeriod": "Período Anterior",

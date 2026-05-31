@@ -653,10 +653,9 @@ class ApiClient {
   }
 
   // Reports methods
-  async getMonthlySummary(year: number, month: number): Promise<unknown> {
-    const url = `/api/reports/monthly-summary?year=${year}&month=${month}`;
-    console.log('Making request to:', url);
-    console.log('Parameters:', { year, month, yearType: typeof year, monthType: typeof month });
+  async getMonthlySummary(year: number, month: number, categoryIds?: string): Promise<unknown> {
+    let url = `/api/reports/monthly-summary?year=${year}&month=${month}`;
+    if (categoryIds) url += `&categoryIds=${encodeURIComponent(categoryIds)}`;
 
     return this.request(url);
   }
@@ -695,11 +694,13 @@ class ApiClient {
     period?: string;
     year?: number;
     month?: number;
+    categoryIds?: string;
   }): Promise<AnalyticsSummaryResponse> {
     const queryParams = new URLSearchParams();
     if (params?.period) queryParams.append('period', params.period);
     if (params?.year) queryParams.append('year', params.year.toString());
     if (params?.month) queryParams.append('month', params.month.toString());
+    if (params?.categoryIds) queryParams.append('categoryIds', params.categoryIds);
     const qs = queryParams.toString();
     return this.request(`/api/reports/analytics-summary${qs ? `?${qs}` : ''}`);
   }

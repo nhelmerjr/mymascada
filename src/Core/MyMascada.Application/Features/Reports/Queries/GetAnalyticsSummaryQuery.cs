@@ -10,6 +10,13 @@ public class GetAnalyticsSummaryQuery : IRequest<AnalyticsSummaryDto>
     public string Period { get; set; } = "year";
     public int? Year { get; set; }
     public int? Month { get; set; }
+
+    /// <summary>
+    /// Optional category filter. When set, only transactions in these categories are considered
+    /// across every metric (income, expenses, savings, trends, yearly comparisons).
+    /// Null/empty means all categories (no filtering).
+    /// </summary>
+    public List<int>? CategoryIds { get; set; }
 }
 
 public class GetAnalyticsSummaryQueryHandler : IRequestHandler<GetAnalyticsSummaryQuery, AnalyticsSummaryDto>
@@ -33,6 +40,14 @@ public class GetAnalyticsSummaryQueryHandler : IRequestHandler<GetAnalyticsSumma
         var transactionList = transactions
             .Where(t => !t.TransferId.HasValue)
             .ToList();
+
+        // Apply optional category filter (affects all metrics: income, expenses, savings, trends).
+        if (request.CategoryIds != null && request.CategoryIds.Any())
+        {
+            transactionList = transactionList
+                .Where(t => t.Category != null && request.CategoryIds.Contains(t.Category.Id))
+                .ToList();
+        }
 
         // Group by year/month
         var monthlyGroups = transactionList

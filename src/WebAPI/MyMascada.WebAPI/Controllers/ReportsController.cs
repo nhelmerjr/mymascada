@@ -27,6 +27,25 @@ public class ReportsController : ControllerBase
     }
 
     /// <summary>
+    /// Parses a comma-separated list of category IDs into a list of ints.
+    /// Returns null when the input is null/empty (meaning: no category filter).
+    /// </summary>
+    private static List<int>? ParseCategoryIds(string? categoryIds)
+    {
+        if (string.IsNullOrWhiteSpace(categoryIds))
+        {
+            return null;
+        }
+
+        return categoryIds
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => int.TryParse(s.Trim(), out var id) ? id : (int?)null)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToList();
+    }
+
+    /// <summary>
     /// Get dashboard summary with total balance, monthly income/expenses, and recent transactions
     /// </summary>
     [HttpGet("dashboard-summary")]
@@ -60,7 +79,7 @@ public class ReportsController : ControllerBase
     /// Get monthly summary for specific month and year
     /// </summary>
     [HttpGet("monthly-summary")]
-    public async Task<ActionResult<MonthlySummaryDto>> GetMonthlySummary([FromQuery] int year, [FromQuery] int month)
+    public async Task<ActionResult<MonthlySummaryDto>> GetMonthlySummary([FromQuery] int year, [FromQuery] int month, [FromQuery] string? categoryIds = null)
     {
         // Basic validation
         if (year < 1900 || year > 3000)
@@ -79,7 +98,8 @@ public class ReportsController : ControllerBase
             {
                 UserId = _currentUserService.GetUserId(),
                 Year = year,
-                Month = month
+                Month = month,
+                CategoryIds = ParseCategoryIds(categoryIds)
             };
 
             var result = await _mediator.Send(query);
@@ -141,24 +161,12 @@ public class ReportsController : ControllerBase
     {
         try
         {
-            // Parse category IDs if provided
-            List<int>? categoryIdList = null;
-            if (!string.IsNullOrWhiteSpace(categoryIds))
-            {
-                categoryIdList = categoryIds
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
-                    .Select(s => int.TryParse(s.Trim(), out var id) ? id : (int?)null)
-                    .Where(id => id.HasValue)
-                    .Select(id => id!.Value)
-                    .ToList();
-            }
-
             var query = new GetCategoryTrendsQuery
             {
                 UserId = _currentUserService.GetUserId(),
                 StartDate = startDate,
                 EndDate = endDate,
-                CategoryIds = categoryIdList,
+                CategoryIds = ParseCategoryIds(categoryIds),
                 Limit = limit
             };
 
@@ -181,7 +189,8 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<AnalyticsSummaryDto>> GetAnalyticsSummary(
         [FromQuery] string period = "year",
         [FromQuery] int? year = null,
-        [FromQuery] int? month = null)
+        [FromQuery] int? month = null,
+        [FromQuery] string? categoryIds = null)
     {
         try
         {
@@ -207,7 +216,8 @@ public class ReportsController : ControllerBase
                 UserId = _currentUserService.GetUserId(),
                 Period = period,
                 Year = year,
-                Month = month
+                Month = month,
+                CategoryIds = ParseCategoryIds(categoryIds)
             };
 
             var result = await _mediator.Send(query);

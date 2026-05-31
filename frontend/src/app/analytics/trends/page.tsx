@@ -7,6 +7,8 @@ import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
 import { CategoryTrendChart } from '@/components/analytics/category-trend-chart';
 import { CategorySelector } from '@/components/analytics/category-selector';
+import { CategoryFilter } from '@/components/analytics/category-filter';
+import { useAnalyticsCategoryFilter } from '@/hooks/use-analytics-category-filter';
 import { TrendSummaryTable } from '@/components/analytics/trend-summary-table';
 import { apiClient, CategoryTrendsResponse } from '@/lib/api-client';
 import { formatCurrency } from '@/lib/utils';
@@ -47,6 +49,8 @@ export default function CategoryTrendsPage() {
   const [trendData, setTrendData] = useState<CategoryTrendsResponse | null>(null);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const categoryFilter = useAnalyticsCategoryFilter();
+  const { categoryIdsParam } = categoryFilter;
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -55,18 +59,26 @@ export default function CategoryTrendsPage() {
   }, [isAuthenticated, isLoading, router]);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && categoryFilter.loaded) {
       loadCategoryTrends();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isAuthenticated, categoryFilter.loaded, categoryIdsParam]);
 
   const loadCategoryTrends = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const data = await apiClient.getCategoryTrends();
+      // Inherit the global analytics category filter. All selected → no filter;
+      // none selected → sentinel [0] (matches nothing).
+      const inheritedCategoryIds = categoryFilter.isAllSelected
+        ? undefined
+        : categoryFilter.selectedIds.length > 0
+          ? categoryFilter.selectedIds
+          : [0];
+
+      const data = await apiClient.getCategoryTrends({ categoryIds: inheritedCategoryIds });
       setTrendData(data);
 
       if (data.categories.length > 0) {
@@ -161,10 +173,26 @@ export default function CategoryTrendsPage() {
       <header className="mb-5">
         <BackButton variant="link" href="/analytics" label={t('categoryTrends.backToAnalytics')} />
 
-        <h1 className="font-[var(--font-dash-sans)] text-3xl font-semibold tracking-[-0.03em] text-ink-900 sm:text-[2.1rem]">
-          {t('categoryTrends.title')}
-        </h1>
-        <p className="mt-1.5 text-[15px] text-ink-500">{t('categoryTrends.subtitle')}</p>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="font-[var(--font-dash-sans)] text-3xl font-semibold tracking-[-0.03em] text-ink-900 sm:text-[2.1rem]">
+              {t('categoryTrends.title')}
+            </h1>
+            <p className="mt-1.5 text-[15px] text-ink-500">{t('categoryTrends.subtitle')}</p>
+          </div>
+
+          <CategoryFilter
+            categories={categoryFilter.categories}
+            selectedSet={categoryFilter.selectedSet}
+            childrenByParent={categoryFilter.childrenByParent}
+            isAllSelected={categoryFilter.isAllSelected}
+            selectedCount={categoryFilter.selectedIds.length}
+            totalCount={categoryFilter.categories.length}
+            onToggle={categoryFilter.toggleCategory}
+            onSelectAll={categoryFilter.selectAll}
+            onClear={categoryFilter.clear}
+          />
+        </div>
       </header>
 
       <section className="mb-6 rounded-2xl border border-ink-200 bg-white/92 p-4 shadow-[0_16px_32px_-28px_rgba(47,129,112,0.20)]">
