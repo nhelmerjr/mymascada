@@ -155,7 +155,24 @@ public class UserAiKernelFactory : IUserAiKernelFactory
         // the HttpClient will not follow redirects automatically.
         var handler = new HttpClientHandler { AllowAutoRedirect = false };
 
-        if (providerType == "openai-compatible" && !string.IsNullOrEmpty(apiEndpoint))
+        if (providerType == "azure-openai")
+        {
+            if (string.IsNullOrEmpty(apiEndpoint))
+                throw new InvalidOperationException("Azure OpenAI requires an API endpoint (the Azure resource URL).");
+
+            // For Azure OpenAI, modelId is the deployment name and apiEndpoint is the
+            // Azure resource URL (e.g. https://my-resource.openai.azure.com/).
+            var httpClient = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromMinutes(5)
+            };
+            builder.AddAzureOpenAIChatCompletion(
+                deploymentName: modelId,
+                endpoint: apiEndpoint,
+                apiKey: apiKey,
+                httpClient: httpClient);
+        }
+        else if (providerType == "openai-compatible" && !string.IsNullOrEmpty(apiEndpoint))
         {
             var httpClient = new HttpClient(handler)
             {

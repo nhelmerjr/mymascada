@@ -71,6 +71,10 @@ public class AiSettingsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ModelId))
             return BadRequest(new { Error = "Model ID is required." });
 
+        // Azure OpenAI requires the resource endpoint to construct requests.
+        if (request.ProviderType == "azure-openai" && string.IsNullOrWhiteSpace(request.ApiEndpoint))
+            return BadRequest(new { Error = "API endpoint is required for Azure OpenAI." });
+
         // Validate API endpoint URL if provided (SSRF protection)
         if (!string.IsNullOrWhiteSpace(request.ApiEndpoint))
         {
@@ -157,6 +161,10 @@ public class AiSettingsController : ControllerBase
             return BadRequest(new { Error = "Provider type is required." });
         if (string.IsNullOrWhiteSpace(request.ModelId))
             return BadRequest(new { Error = "Model ID is required." });
+
+        // Azure OpenAI requires the resource endpoint to construct requests.
+        if (request.ProviderType == "azure-openai" && string.IsNullOrWhiteSpace(request.ApiEndpoint))
+            return BadRequest(new { Error = "API endpoint is required for Azure OpenAI." });
 
         // Resolve API key: use provided key, or fall back to existing encrypted key
         var apiKey = request.ApiKey;
@@ -256,6 +264,15 @@ public class AiSettingsController : ControllerBase
                     new() { Id = "mistral", Name = "Mistral" },
                     new() { Id = "qwen2.5", Name = "Qwen 2.5" }
                 }
+            },
+            new()
+            {
+                Id = "azure-openai",
+                Name = "Azure OpenAI",
+                ProviderType = "azure-openai",
+                DefaultEndpoint = null,
+                // Azure deployment names are user-defined, so no presets — entered as a custom model.
+                Models = new List<AiModelPreset>()
             },
             new()
             {

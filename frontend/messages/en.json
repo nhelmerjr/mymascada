@@ -2112,11 +2112,14 @@
       "model": {
         "label": "Model",
         "placeholder": "Select or type a model name",
-        "custom": "Custom model"
+        "custom": "Custom model",
+        "azureHint": "For Azure OpenAI, enter your deployment name (not the underlying model name)."
       },
       "endpoint": {
         "label": "API Endpoint",
-        "placeholder": "https://api.example.com/v1"
+        "placeholder": "https://api.example.com/v1",
+        "azurePlaceholder": "https://my-resource.openai.azure.com/",
+        "azureHint": "Your Azure OpenAI resource endpoint URL."
       },
       "testConnection": "Test Connection",
       "testing": "Testing...",

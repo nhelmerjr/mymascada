@@ -136,6 +136,7 @@ export default function AiSettingsPage() {
 
   const selectedProvider = providers.find((p) => p.id === selectedProviderId);
   const isStandardOpenAI = selectedProvider?.providerType === 'openai';
+  const isAzure = selectedProvider?.providerType === 'azure-openai';
   const effectiveModel = customModel || modelId;
 
   const handleProviderChange = (providerId: string) => {
@@ -488,6 +489,9 @@ export default function AiSettingsPage() {
                       className="w-full"
                     />
                   )}
+                  {isAzure && (
+                    <p className="text-xs text-ink-500 mt-1.5">{t('model.azureHint')}</p>
+                  )}
                 </div>
 
                 {/* Endpoint */}
@@ -500,9 +504,12 @@ export default function AiSettingsPage() {
                       type="url"
                       value={apiEndpoint}
                       onChange={(e) => setApiEndpoint(e.target.value)}
-                      placeholder={t('endpoint.placeholder')}
+                      placeholder={isAzure ? t('endpoint.azurePlaceholder') : t('endpoint.placeholder')}
                       className="w-full"
                     />
+                    {isAzure && (
+                      <p className="text-xs text-ink-500 mt-1.5">{t('endpoint.azureHint')}</p>
+                    )}
                   </div>
                 )}
 
