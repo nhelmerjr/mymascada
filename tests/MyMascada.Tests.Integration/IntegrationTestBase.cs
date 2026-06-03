@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
@@ -23,12 +24,30 @@ public abstract class IntegrationTestBase : IClassFixture<WebApplicationFactory<
     protected readonly ApplicationDbContext DbContext;
     protected readonly Guid TestUserId = Guid.NewGuid();
 
+    // JWT settings shared between the host (token validation) and GenerateJwtToken (signing),
+    // so they must match for authenticated requests to succeed.
+    private const string TestJwtKey = "super-secret-key-for-testing-that-is-32-chars-long!!";
+    private const string TestJwtIssuer = "MyMascadaTest";
+    private const string TestJwtAudience = "MyMascadaTest";
+
+    // Program.cs reads several settings from configuration BEFORE building the host (e.g.
+    // Jwt:Key throws if missing). ConfigureAppConfiguration runs too late for those, so set
+    // them as environment variables — a source WebApplication.CreateBuilder reads up front.
+    static IntegrationTestBase()
+    {
+        Environment.SetEnvironmentVariable("Jwt__Key", TestJwtKey);
+        Environment.SetEnvironmentVariable("Jwt__Issuer", TestJwtIssuer);
+        Environment.SetEnvironmentVariable("Jwt__Audience", TestJwtAudience);
+        Environment.SetEnvironmentVariable("ConnectionStrings__DefaultConnection",
+            "Host=localhost;Database=mymascada_test;Username=test;Password=test");
+    }
+
     protected IntegrationTestBase(WebApplicationFactory<Program> factory)
     {
         Factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
-            
+
             builder.ConfigureServices(services =>
             {
                 // Remove all existing DbContext registrations
@@ -42,10 +61,13 @@ public abstract class IntegrationTestBase : IClassFixture<WebApplicationFactory<
                     services.Remove(descriptor);
                 }
 
-                // Add in-memory database for testing
+                // Add in-memory database for testing. The database name must be captured ONCE
+                // (not inside the options lambda) so every DbContext instance in this test shares
+                // the same store — otherwise seeded data is invisible to the request's context.
+                var dbName = $"TestDb_{Guid.NewGuid()}";
                 services.AddDbContext<ApplicationDbContext>(options =>
                 {
-                    options.UseInMemoryDatabase($"TestDb_{Guid.NewGuid()}");
+                    options.UseInMemoryDatabase(dbName);
                     options.EnableSensitiveDataLogging();
                 }, ServiceLifetime.Scoped);
 
@@ -77,8 +99,8 @@ public abstract class IntegrationTestBase : IClassFixture<WebApplicationFactory<
     private string GenerateJwtToken(Guid userId)
     {
         var tokenHandler = new JwtSecurityTokenHandler();
-        var key = Encoding.ASCII.GetBytes("super-secret-key-for-testing-that-is-32-chars-long!!");
-        
+        var key = Encoding.ASCII.GetBytes(TestJwtKey);
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(new[]
@@ -87,6 +109,8 @@ public abstract class IntegrationTestBase : IClassFixture<WebApplicationFactory<
                 new Claim(ClaimTypes.Name, "Test User"),
                 new Claim(ClaimTypes.Email, "test@example.com")
             }),
+            Issuer = TestJwtIssuer,
+            Audience = TestJwtAudience,
             Expires = DateTime.UtcNow.AddHours(1),
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
         };
