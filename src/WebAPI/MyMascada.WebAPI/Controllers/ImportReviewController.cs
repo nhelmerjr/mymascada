@@ -6,8 +6,11 @@ using MyMascada.Application.Common.Interfaces;
 using MyMascada.Application.Features.ImportReview.Commands;
 using MyMascada.Application.Features.ImportReview.DTOs;
 using MyMascada.Application.Features.CsvImport.DTOs;
+using MyMascada.Application.Common.Csv;
 using MyMascada.Domain.Enums;
+using MyMascada.Infrastructure.Services.OfxImport;
 using CsvHelper;
+using CsvHelper.Configuration;
 
 namespace MyMascada.WebAPI.Controllers;
 
@@ -21,12 +24,14 @@ public class ImportReviewController : ControllerBase
     private readonly IMediator _mediator;
     private readonly IAICsvAnalysisService _aiAnalysisService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly OfxParserService _ofxParser;
 
-    public ImportReviewController(IMediator mediator, IAICsvAnalysisService aiAnalysisService, ICurrentUserService currentUserService)
+    public ImportReviewController(IMediator mediator, IAICsvAnalysisService aiAnalysisService, ICurrentUserService currentUserService, OfxParserService ofxParser)
     {
         _mediator = mediator;
         _aiAnalysisService = aiAnalysisService;
         _currentUserService = currentUserService;
+        _ofxParser = ofxParser;
     }
 
     /// <summary>
@@ -58,7 +63,7 @@ public class ImportReviewController : ControllerBase
             
             using var stream = new MemoryStream(csvData);
             using var reader = new StreamReader(stream);
-            using var csv = new CsvHelper.CsvReader(reader, System.Globalization.CultureInfo.InvariantCulture);
+            using var csv = new CsvHelper.CsvReader(reader, CreateCsvConfiguration());
 
             var hasHeader = request.HasHeader;
             if (hasHeader)
@@ -137,7 +142,7 @@ public class ImportReviewController : ControllerBase
 
         using var stream = new MemoryStream(csvBytes);
         using var reader = new StreamReader(stream);
-        using var csv = new CsvHelper.CsvReader(reader, System.Globalization.CultureInfo.InvariantCulture);
+        using var csv = new CsvHelper.CsvReader(reader, CreateCsvConfiguration());
 
         var hasHeader = csvData.HasHeader;
         if (hasHeader)
@@ -193,6 +198,65 @@ public class ImportReviewController : ControllerBase
     }
 
     /// <summary>
+    /// Parses base64-encoded OFX/QFX content into import candidates, mirroring the direct
+    /// OFX import mapping (Name as description, FITID as external reference, signed amount).
+    /// </summary>
+    private async Task<IEnumerable<ImportCandidateDto>> ConvertOfxToCandidatesAsync(OfxImportData ofxData)
+    {
+        byte[] ofxBytes;
+        try
+        {
+            ofxBytes = Convert.FromBase64String(ofxData.Content);
+        }
+        catch (FormatException)
+        {
+            throw new ArgumentException("Invalid OFX content format");
+        }
+
+        using var stream = new MemoryStream(ofxBytes);
+        var parseResult = await _ofxParser.ParseOfxFileAsync(stream);
+
+        if (!parseResult.Success)
+        {
+            throw new ArgumentException(
+                string.IsNullOrWhiteSpace(parseResult.Message) ? "Failed to parse OFX file" : parseResult.Message);
+        }
+
+        var candidates = new List<ImportCandidateDto>();
+        var rowNumber = 0;
+        foreach (var txn in parseResult.Transactions)
+        {
+            var description = !string.IsNullOrWhiteSpace(txn.Name)
+                ? txn.Name
+                : (!string.IsNullOrWhiteSpace(txn.Memo) ? txn.Memo! : "Unknown Transaction");
+
+            candidates.Add(new ImportCandidateDto
+            {
+                TempId = Guid.NewGuid().ToString(),
+                Amount = txn.Amount,
+                Date = EnsureUtc(txn.PostedDate),
+                Description = description,
+                ReferenceId = string.IsNullOrWhiteSpace(txn.TransactionId) ? null : txn.TransactionId,
+                ExternalReferenceId = string.IsNullOrWhiteSpace(txn.TransactionId) ? null : txn.TransactionId,
+                Notes = txn.Memo,
+                Status = TransactionStatus.Cleared,
+                // OFX amounts are signed: positive = credit/income, negative = debit/expense.
+                Type = txn.Amount > 0 ? TransactionType.Income : TransactionType.Expense,
+                SourceRowNumber = ++rowNumber
+            });
+        }
+
+        return candidates;
+    }
+
+    private static DateTime EnsureUtc(DateTime dateTime) => dateTime.Kind switch
+    {
+        DateTimeKind.Utc => dateTime,
+        DateTimeKind.Local => dateTime.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)
+    };
+
+    /// <summary>
     /// Analyzes import candidates for conflicts and duplicates
     /// </summary>
     [HttpPost("analyze")]
@@ -207,10 +271,10 @@ public class ImportReviewController : ControllerBase
             {
                 candidates = ConvertCsvToCandidates(request.CsvData);
             }
-            // If OFX data is provided, convert it to candidates (future implementation)
+            // If OFX data is provided, parse and convert it to candidates
             else if (request.OfxData != null && !string.IsNullOrEmpty(request.OfxData.Content))
             {
-                throw new NotImplementedException("OFX import analysis is not yet implemented");
+                candidates = await ConvertOfxToCandidatesAsync(request.OfxData);
             }
 
             var command = new AnalyzeImportCommand
@@ -347,6 +411,20 @@ public class ImportReviewController : ControllerBase
 
     #region Helper Methods
 
+    /// <summary>
+    /// CSV reader configuration that auto-detects the delimiter (comma, semicolon, tab or
+    /// pipe) so locale-specific exports — e.g. tab/semicolon-separated pt-BR bank statements —
+    /// are parsed into the correct columns instead of a single column.
+    /// </summary>
+    private static CsvConfiguration CreateCsvConfiguration() => new(System.Globalization.CultureInfo.InvariantCulture)
+    {
+        DetectDelimiter = true,
+        IgnoreBlankLines = true,
+        TrimOptions = TrimOptions.Trim,
+        BadDataFound = null,
+        MissingFieldFound = null
+    };
+
     private static string? GetFieldValue(CsvHelper.CsvReader csv, string? columnName)
     {
         if (string.IsNullOrEmpty(columnName))
@@ -362,19 +440,7 @@ public class ImportReviewController : ControllerBase
         }
     }
 
-    private static decimal ParseAmount(string? amountStr)
-    {
-        if (string.IsNullOrWhiteSpace(amountStr))
-            return 0;
-
-        // Remove common formatting characters
-        var cleanAmount = amountStr.Replace(",", "").Replace("$", "").Replace("€", "").Trim();
-        
-        if (decimal.TryParse(cleanAmount, out var amount))
-            return amount;
-
-        return 0;
-    }
+    private static decimal ParseAmount(string? amountStr) => CsvAmountParser.Parse(amountStr);
 
     private static bool DetermineTransactionDirection(decimal amount, string? typeValue, CsvColumnMappings mappings)
     {
