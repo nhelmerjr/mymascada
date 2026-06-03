@@ -4,6 +4,7 @@ using System.Text.Json;
 using CsvHelper;
 using CsvHelper.Configuration;
 using Microsoft.Extensions.Logging;
+using MyMascada.Application.Common.Csv;
 using MyMascada.Application.Common.Interfaces;
 using MyMascada.Application.Features.CsvImport.DTOs;
 
@@ -145,10 +146,14 @@ public class AICsvAnalysisService : IAICsvAnalysisService
             {
                 HasHeaderRecord = true,
                 IgnoreBlankLines = true,
-                TrimOptions = TrimOptions.Trim
+                TrimOptions = TrimOptions.Trim,
+                DetectDelimiter = true
             };
 
-            using var reader = new StreamReader(csvStream);
+            // leaveOpen: true — the same request stream is read multiple times (sample rows,
+            // distinct type values). Disposing it here would throw ObjectDisposedException on
+            // the next read.
+            using var reader = new StreamReader(csvStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
             using var csv = new CsvReader(reader, config);
             
             // Read header
@@ -213,10 +218,14 @@ public class AICsvAnalysisService : IAICsvAnalysisService
             {
                 HasHeaderRecord = true,
                 IgnoreBlankLines = true,
-                TrimOptions = TrimOptions.Trim
+                TrimOptions = TrimOptions.Trim,
+                DetectDelimiter = true
             };
 
-            using var reader = new StreamReader(csvStream);
+            // leaveOpen: true — the same request stream is read multiple times (sample rows,
+            // distinct type values). Disposing it here would throw ObjectDisposedException on
+            // the next read.
+            using var reader = new StreamReader(csvStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
             using var csv = new CsvReader(reader, config);
             
             // Read header
@@ -601,10 +610,14 @@ If a field doesn't exist, use null for the column name.";
             {
                 HasHeaderRecord = true,
                 IgnoreBlankLines = true,
-                TrimOptions = TrimOptions.Trim
+                TrimOptions = TrimOptions.Trim,
+                DetectDelimiter = true
             };
 
-            using var reader = new StreamReader(csvStream);
+            // leaveOpen: true — the same request stream is read multiple times (sample rows,
+            // distinct type values). Disposing it here would throw ObjectDisposedException on
+            // the next read.
+            using var reader = new StreamReader(csvStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
             using var csv = new CsvReader(reader, config);
             
             // Read header
@@ -701,16 +714,14 @@ If a field doesn't exist, use null for the column name.";
             }
         }
 
-        // Validate amount
+        // Validate amount (locale-aware: handles both en-US and pt-BR conventions)
         if (!string.IsNullOrEmpty(mappings.AmountColumn))
         {
-            var amountValue = row.GetValueOrDefault(mappings.AmountColumn, "")
-                .Replace("$", "").Replace(",", "").Replace("(", "-").Replace(")", "");
-            
-            if (!decimal.TryParse(amountValue, NumberStyles.Any, 
-                CultureInfo.InvariantCulture, out _))
+            var rawAmount = row.GetValueOrDefault(mappings.AmountColumn, "");
+            if (!string.IsNullOrWhiteSpace(rawAmount) && CsvAmountParser.Parse(rawAmount) == 0m
+                && !LooksLikeZero(rawAmount))
             {
-                errors.Add($"Invalid amount format: '{amountValue}'");
+                errors.Add($"Invalid amount format: '{rawAmount}'");
             }
         }
 
@@ -726,6 +737,10 @@ If a field doesn't exist, use null for the column name.";
 
         return errors;
     }
+
+    // A value that legitimately parses to zero (e.g. "0", "0.00", "0,00") is not an error.
+    private static bool LooksLikeZero(string raw) =>
+        raw.All(c => !char.IsDigit(c) || c == '0');
 
     private class ColumnAnalysis
     {

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
+using MyMascada.Application.Common.Csv;
 using MyMascada.Application.Common.Interfaces;
 using MyMascada.Application.Features.CsvImport.DTOs;
 using MyMascada.Domain.Enums;
@@ -32,6 +33,7 @@ public class CsvParserService : ICsvParserService
                 HasHeaderRecord = hasHeader,
                 IgnoreBlankLines = true,
                 TrimOptions = TrimOptions.Trim,
+                DetectDelimiter = true,
                 BadDataFound = context =>
                 {
                     result.Warnings.Add($"Bad data found at row {context.Context.Parser.Row}: {context.RawRecord}");
@@ -96,15 +98,16 @@ public class CsvParserService : ICsvParserService
             if (string.IsNullOrWhiteSpace(content))
                 return false;
 
-            // Check for basic CSV indicators
-            if (!content.Contains(',') && !content.Contains(';'))
+            // Check for basic CSV indicators (comma, semicolon or tab separated)
+            if (!content.Contains(',') && !content.Contains(';') && !content.Contains('\t'))
                 return false;
 
             // Try to parse first record with CsvHelper
             var config = new CsvConfiguration(CultureInfo.InvariantCulture)
             {
                 HasHeaderRecord = true,
-                IgnoreBlankLines = true
+                IgnoreBlankLines = true,
+                DetectDelimiter = true
             };
 
             using var reader = new StringReader(content);
@@ -258,25 +261,21 @@ public class CsvParserService : ICsvParserService
                 return null; // Description is required
             }
 
-            // Parse amount
+            // Parse amount (locale-aware: handles both en-US and pt-BR conventions)
             var amountText = record[mapping.AmountColumn]?.Trim() ?? "0";
-            // Remove common currency symbols and formatting
-            amountText = amountText.Replace("$", "").Replace(",", "").Replace("(", "-").Replace(")", "");
-            
-            if (decimal.TryParse(amountText, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign, 
-                CultureInfo.InvariantCulture, out var amount))
-            {
-                // Apply bank-specific amount sign convention
-                if (mapping.IsAmountPositiveForDebits && amount < 0)
-                {
-                    amount = -amount; // Convert negative debits to positive
-                }
-                transaction.Amount = amount;
-            }
-            else
+            if (string.IsNullOrWhiteSpace(amountText))
             {
                 return null; // Invalid amount
             }
+
+            var amount = CsvAmountParser.Parse(amountText);
+
+            // Apply bank-specific amount sign convention
+            if (mapping.IsAmountPositiveForDebits && amount < 0)
+            {
+                amount = -amount; // Convert negative debits to positive
+            }
+            transaction.Amount = amount;
 
             // Parse optional fields
             if (mapping.ReferenceColumn.HasValue && mapping.ReferenceColumn.Value < record.Length)

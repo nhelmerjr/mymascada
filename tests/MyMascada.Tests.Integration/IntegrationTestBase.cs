@@ -154,7 +154,6 @@ public abstract class IntegrationTestBase : IClassFixture<WebApplicationFactory<
         var category = new Category
         {
             Name = name,
-            Type = Domain.Enums.CategoryType.Expense,
             Color = "#FF0000",
             IsSystemCategory = false,
             IsActive = true,

@@ -390,7 +390,7 @@ function ImportPageContent() {
   // ── CSV mapping complete → conflict analysis ───────────────────────────────
 
   const handleMappingComplete = async (result: ImportResult) => {
-    if (!csvContent || !csvAnalysisResult) {
+    if (!csvContent || !csvAnalysisResult || !selectedFile) {
       console.error('Missing CSV content or analysis result');
       return;
     }
@@ -422,11 +422,15 @@ function ImportPageContent() {
     };
 
     try {
+      // Encode the original file bytes (preserves UTF-8 accents in headers/values).
+      // btoa() must NOT be used here: it is Latin-1 and corrupts accented column names
+      // (e.g. "Histórico", "Descrição"), which then fail to match on the backend.
+      const encodedCsv = await fileToBase64(selectedFile);
       const analysisResponse = await apiClient.analyzeImportForReview({
         source: 'csv',
         accountId: selectedAccountId,
         csvData: {
-          content: btoa(csvContent),
+          content: encodedCsv,
           mappings: backendMappings,
           hasHeader: true,
         },
