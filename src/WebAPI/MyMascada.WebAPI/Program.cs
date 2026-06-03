@@ -101,7 +101,11 @@ builder.Services.AddScoped<MyMascada.Application.Common.Interfaces.ICurrentUserS
 // Add Data Protection and Session support for OAuth
 // Persist keys to a directory so they survive container restarts
 var isLocalDev = builder.Environment.IsLocalDevelopment();
-var keysDirectory = isLocalDev
+// Integration tests run under the "Testing" environment outside the container,
+// where the hardcoded /app/data path is not writable. Use a local writable path
+// in that case (ephemeral Data Protection keys are fine for tests).
+var useLocalKeys = isLocalDev || builder.Environment.IsEnvironment("Testing");
+var keysDirectory = useLocalKeys
     ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyMascada", "Keys")
     : "/app/data/keys";
 
@@ -178,7 +182,7 @@ builder.Services.AddDescriptionCleaningServices(builder.Configuration);
 builder.Services.AddBankProviderServices(builder.Configuration);
 builder.Services.AddEmailServices(builder.Configuration);
 builder.Services.AddHealthCheckServices();
-builder.Services.AddBackgroundJobs(builder.Configuration);
+builder.Services.AddBackgroundJobs(builder.Configuration, builder.Environment);
 builder.Services.AddCorsConfiguration(builder.Configuration);
 builder.Services.AddRateLimitingConfiguration(builder.Configuration);
 builder.Services.AddAiChatServices();
@@ -430,7 +434,11 @@ if (app.Environment.IsDevelopment())
     app.Logger.LogInformation("Hangfire Dashboard available at /hangfire");
 }
 
-// Register recurring Hangfire jobs (use DI-based API instead of static RecurringJob)
+// Register recurring Hangfire jobs (use DI-based API instead of static RecurringJob).
+// Skipped under "Testing": registering jobs acquires a Postgres distributed lock, and
+// integration tests run without a database (the Hangfire server is also disabled there).
+if (!app.Environment.IsEnvironment("Testing"))
+{
 var recurringJobManager = app.Services.GetRequiredService<IRecurringJobManager>();
 
 recurringJobManager.AddOrUpdate<MyMascada.Infrastructure.BackgroundJobs.ITokenCleanupService>(
@@ -488,6 +496,7 @@ using (var backfillScope = app.Services.CreateScope())
             service => service.BackfillAllUsersAsync(CancellationToken.None));
     }
 }
+} // end: skip recurring jobs / backfill under "Testing"
 
 // Map controllers
 app.MapControllers();

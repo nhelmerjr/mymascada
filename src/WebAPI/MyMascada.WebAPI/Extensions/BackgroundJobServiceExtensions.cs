@@ -1,11 +1,12 @@
 using Hangfire;
 using Hangfire.PostgreSql;
+using Microsoft.Extensions.Hosting;
 
 namespace MyMascada.WebAPI.Extensions;
 
 public static class BackgroundJobServiceExtensions
 {
-    public static IServiceCollection AddBackgroundJobs(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddBackgroundJobs(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
         // Add Hangfire Configuration
         services.AddHangfire(config => config
@@ -17,12 +18,17 @@ public static class BackgroundJobServiceExtensions
                 options.UseNpgsqlConnection(configuration.GetConnectionString("DefaultConnection"));
             }));
 
-        // Add Hangfire Server
-        services.AddHangfireServer(options =>
+        // The Hangfire server connects to Postgres on startup. Integration tests run under
+        // the "Testing" environment without a database, so skip it there (storage stays
+        // registered but unused; recurring jobs are also not registered in Testing).
+        if (!environment.IsEnvironment("Testing"))
         {
-            options.WorkerCount = Environment.ProcessorCount; // Use all available cores
-            options.Queues = new[] { "default", "categorization" }; // Support multiple queues
-        });
+            services.AddHangfireServer(options =>
+            {
+                options.WorkerCount = Environment.ProcessorCount; // Use all available cores
+                options.Queues = new[] { "default", "categorization" }; // Support multiple queues
+            });
+        }
 
         // Add Hangfire Background Job Services
         services.AddScoped<MyMascada.Application.BackgroundJobs.ITransactionCategorizationJobService,
